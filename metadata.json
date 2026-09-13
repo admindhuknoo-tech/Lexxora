@@ -1,0 +1,6 @@
+{
+  "name": "LexiCore Assistant",
+  "description": "Evidence-to-Action Legal Intelligence and Lawyer Operating System.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

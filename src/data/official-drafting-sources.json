@@ -1,0 +1,132 @@
+{
+  "snapshot_date": "2026-09-13",
+  "policy": "OFFICIAL_FORMAT_REFERENCE berarti terdapat format/contoh publik pada situs resmi. OFFICIAL_PROCEDURAL_REFERENCE/LEGAL_REQUIREMENT hanya digunakan sebagai checklist struktur dan tidak boleh diklaim sebagai format resmi.",
+  "sources": {
+    "MA_SEMA_6_1994": {
+      "title": "SEMA Nomor 6 Tahun 1994 tentang Surat Kuasa Khusus",
+      "issuer": "Mahkamah Agung RI",
+      "url": "https://jdih.mahkamahagung.go.id/legal-product/sema-no-06-tahun-1994/detail",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan syarat kekhususan surat kuasa dan identifikasi perkara/pihak."
+    },
+    "MA_SEMA_1_1971": {
+      "title": "SEMA Nomor 1 Tahun 1971 tentang Surat Kuasa Khusus",
+      "issuer": "Mahkamah Agung RI",
+      "url": "https://jdih.mahkamahagung.go.id/legal-product/sema-nomor-01-tahun-1971/detail",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan tambahan surat kuasa khusus."
+    },
+    "KUHAP_2025_BPK": {
+      "title": "UU Nomor 20 Tahun 2025 tentang Kitab Undang-Undang Hukum Acara Pidana",
+      "issuer": "Pemerintah RI / Database Peraturan BPK",
+      "url": "https://peraturan.bpk.go.id/Details/337302",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan hukum acara pidana yang berlaku mulai 2 Januari 2026; bukan contoh formulir."
+    },
+    "PN_JAKSEL_PROSEDUR_PERDATA": {
+      "title": "Prosedur Pengajuan Perkara",
+      "issuer": "Pengadilan Negeri Jakarta Selatan",
+      "url": "https://pn-jakartaselatan.go.id/prosedur-pengajuan-perkara",
+      "kind": "OFFICIAL_PROCEDURAL_REFERENCE",
+      "note": "Acuan kelengkapan administrasi gugatan/perkara perdata."
+    },
+    "MA_PERMA_4_2019": {
+      "title": "PERMA Nomor 4 Tahun 2019 tentang Perubahan Tata Cara Penyelesaian Gugatan Sederhana",
+      "issuer": "Mahkamah Agung RI",
+      "url": "https://jdih.mahkamahagung.go.id/index.php/legal-product/perma-nomor-4-tahun-2019/detail",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan khusus gugatan sederhana."
+    },
+    "PA_SURABAYA_FORMATS": {
+      "title": "Format Permohonan/Gugatan",
+      "issuer": "Pengadilan Agama Surabaya Kelas IA",
+      "url": "https://pa-surabaya.go.id/halaman/content/format-permohonan-gugatan",
+      "kind": "OFFICIAL_FORMAT_REFERENCE",
+      "note": "Halaman resmi menyediakan blanko/format berbagai perkara cerai, hadhanah, harta bersama, ahli waris, perwalian, dan permohonan keluarga."
+    },
+    "PA_JAKSEL_FORMATS": {
+      "title": "Format Gugatan & Permohonan",
+      "issuer": "Pengadilan Agama Jakarta Selatan Kelas IA",
+      "url": "https://pa-jakartaselatan.go.id/main/format_gugatan",
+      "kind": "OFFICIAL_FORMAT_REFERENCE",
+      "note": "Halaman resmi menyediakan format mandiri RTF/DOC untuk cerai gugat, cerai talak, dispensasi, isbat, waris, dan variasinya."
+    },
+    "UU_PERADILAN_AGAMA": {
+      "title": "UU Nomor 7 Tahun 1989 tentang Peradilan Agama beserta perubahannya",
+      "issuer": "Pemerintah RI / Database Peraturan BPK",
+      "url": "https://peraturan.bpk.go.id/Details/46804/uu-no-7-tahun-1989",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan kompetensi dan hukum acara Peradilan Agama; status perubahan perlu diperhatikan."
+    },
+    "PTUN_SURABAYA_FORMATS": {
+      "title": "Contoh Format Gugatan dan Surat Kuasa",
+      "issuer": "PTUN Surabaya",
+      "url": "https://ptun-surabaya.go.id/contoh-format-gugatan-dan-surat-kuasa/",
+      "kind": "OFFICIAL_FORMAT_REFERENCE",
+      "note": "Menyediakan format surat kuasa khusus, gugatan/tindakan faktual, gugatan badan hukum perdata, jawaban tergugat, intervensi, prodeo."
+    },
+    "UU_PTUN": {
+      "title": "UU Nomor 5 Tahun 1986 tentang Peradilan Tata Usaha Negara beserta perubahannya",
+      "issuer": "Pemerintah RI / Database Peraturan BPK",
+      "url": "https://peraturan.bpk.go.id/Details/46914/uu",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan kewenangan, objek, tenggang, dan hukum acara PTUN; perhatikan perubahan UU 9/2004 dan UU 51/2009."
+    },
+    "PENGADILAN_PAJAK_FORMS": {
+      "title": "Formulir dan Format Pengadilan Pajak",
+      "issuer": "Sekretariat Pengadilan Pajak, Kementerian Keuangan",
+      "url": "https://setpp.kemenkeu.go.id/peraturan",
+      "kind": "OFFICIAL_FORMAT_REFERENCE",
+      "note": "Memuat format banding/gugatan, pencabutan, pakta integritas, izin kuasa hukum, e-Tax Court, dan formulir resmi lain."
+    },
+    "PENGADILAN_PAJAK_GUGATAN": {
+      "title": "Format Surat Gugatan sesuai SE-08/PP/2017",
+      "issuer": "Sekretariat Pengadilan Pajak, Kementerian Keuangan",
+      "url": "https://setpp.kemenkeu.go.id/pengumuman/Details/31",
+      "kind": "OFFICIAL_FORMAT_REFERENCE",
+      "note": "Contoh resmi surat gugatan Pengadilan Pajak."
+    },
+    "UU_PENGADILAN_PAJAK": {
+      "title": "UU Nomor 14 Tahun 2002 tentang Pengadilan Pajak",
+      "issuer": "Pemerintah RI / Database Peraturan BPK",
+      "url": "https://peraturan.bpk.go.id/Details/44449/uu-no-",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan umum beracara di Pengadilan Pajak; cek perkembangan kelembagaan terbaru."
+    },
+    "KEMNAKER_BIPARTIT": {
+      "title": "Permenaker PER.31/MEN/XII/2008 tentang Pedoman Penyelesaian Perselisihan Hubungan Industrial Melalui Perundingan Bipartit",
+      "issuer": "Kementerian Ketenagakerjaan",
+      "url": "https://jdih.kemnaker.go.id/peraturan/detail/199/peraturan-menteri-nomor-31-tahun-2008",
+      "kind": "OFFICIAL_FORMAT_REFERENCE",
+      "note": "Lampiran memuat contoh permintaan bipartit, daftar hadir, risalah, perjanjian bersama, dan pencatatan perselisihan."
+    },
+    "UU_PPHI": {
+      "title": "UU Nomor 2 Tahun 2004 tentang Penyelesaian Perselisihan Hubungan Industrial",
+      "issuer": "Pemerintah RI / Database Peraturan BPK",
+      "url": "https://peraturan.bpk.go.id/Details/40452/uu-no-2-",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan tahapan bipartit, pencatatan, mediasi/konsiliasi/arbitrase, PHI dan upaya hukum."
+    },
+    "MA_EXECUTION_STANDARD": {
+      "title": "Standar Pelayanan Perkara Perdata Permohonan Eksekusi",
+      "issuer": "Badan Peradilan di bawah Mahkamah Agung RI",
+      "url": "https://jdih.mahkamahagung.go.id/storage/uploads/produk_hukum/2024/2024sk-ketua%20pengadilan1405134/KPN.W4-U8/SK.HM1.1.1/VIII/2024.pdf",
+      "kind": "OFFICIAL_PROCEDURAL_REFERENCE",
+      "note": "Acuan persyaratan dan tahapan permohonan eksekusi, aanmaning, sita, dan lelang."
+    },
+    "BADILUM_EXECUTION": {
+      "title": "Mekanisme Permohonan dan Pelaksanaan Eksekusi Riil",
+      "issuer": "Direktorat Jenderal Badan Peradilan Umum",
+      "url": "https://badilum.mahkamahagung.go.id/images/Pelaksanaan_Eksekusi_Pada_PN_dan_Kepatuhan_Penginputan_Eksekusi_e535e.pdf",
+      "kind": "OFFICIAL_PROCEDURAL_REFERENCE",
+      "note": "Acuan alur pelaksanaan eksekusi riil."
+    },
+    "UU_ADVOKAT": {
+      "title": "UU Nomor 18 Tahun 2003 tentang Advokat",
+      "issuer": "Pemerintah RI / Database Peraturan BPK",
+      "url": "https://peraturan.bpk.go.id/Details/43018/uu-no-18-tahun-2003",
+      "kind": "OFFICIAL_LEGAL_REQUIREMENT",
+      "note": "Acuan hubungan profesional advokat, hak/kewajiban, honorarium dan profesi; bukan contoh formulir kantor hukum."
+    }
+  }
+}
