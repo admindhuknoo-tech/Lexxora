@@ -1,0 +1,167 @@
+{
+  "version": "V6.11.3",
+  "purpose": "Permanent deterministic corpus for Group A correctness, Group B strategic-output invariants, and Group C source-robustness including canonical sanitized-text propagation, mixed-content OCR salvage, and wrapped multi-line OCR block sanitization.",
+  "fixtures": [
+    {
+      "id": "ownership-consultation",
+      "text": "Ada SHM nomor 10 seluas 10.000m2 atas nama 3 orang, Agus, Budi dan Bambang lokasinya di Surabaya. Tanah ini terpotong Tol 3000m2, sertipikat sisanya di proses Kantor BPN/ATR Kota Surabaya. Sementara dalam proses SHM untuk sisa tanah itu ketiganya meninggal dunia. Para ahli warisnya Agus ada 5 orang 4 di Surabaya yg satu di Jakarta. Para ahli warisnya Budi ada 4 orang 2 di Sidoarjo, 1 di Bali dan 1 di Bandung. Para ahli warisnya Bambang ada 7 orang. Bagaimana proses hukum untuk para ahli waris dan sisa tanah tersebut?",
+      "expected": {
+        "source_role": "CASE_NARRATIVE_OR_QUESTION",
+        "actors_include": [
+          "Agus",
+          "Budi",
+          "Bambang"
+        ],
+        "orientation": "GENERAL_COUNSEL_REVIEW",
+        "procedural_stage": "CONSULTATION",
+        "min_claims": 6
+      }
+    },
+    {
+      "id": "investigation-bap",
+      "text": "BERITA ACARA PEMERIKSAAN TERSANGKA. Pada hari ini penyidik melakukan pemeriksaan terhadap Tersangka Andi. Penyidik menanyakan asal barang bukti dan Tersangka menerangkan bahwa barang tersebut diterima dari Budi. Pemeriksaan dilakukan dalam tahap penyidikan dan berita acara ditandatangani setelah dibacakan.",
+      "expected": {
+        "source_role": "INVESTIGATION_OR_BAP",
+        "actors_include": [
+          "Tersangka",
+          "Penyidik",
+          "Budi"
+        ],
+        "orientation": "CRIMINAL_DEFENSE",
+        "procedural_stage": "INVESTIGATION"
+      }
+    },
+    {
+      "id": "civil-litigation-adverse",
+      "text": "JAWABAN TERGUGAT. Penggugat mendalilkan bahwa Tergugat belum membayar kewajiban. Tergugat membantah dalil Penggugat dan menyatakan pembayaran telah dilakukan. Dalam eksepsi Tergugat memohon gugatan dinyatakan tidak dapat diterima. Bukti pembayaran akan diajukan dalam persidangan.",
+      "expected": {
+        "source_role": "LITIGATION_SUBMISSION",
+        "actors_include": [
+          "Penggugat",
+          "Tergugat"
+        ],
+        "orientation": "CIVIL_DEFENSE",
+        "procedural_stage": "PLEADING",
+        "min_adverse": 1
+      }
+    },
+    {
+      "id": "ocr-span-noise-litigation",
+      "text": "--- HALAMAN 1 ---\nJAWABAN TERGUGAT. Penggugat mengajukan gugatan terhadap para Tergugat.\nPAI fY PERADI KA TANT P A &ASSOCIATES aa MENGEGGT Gaia & IA W 4 Alamat :\nIII Melawan Ninik Sugiyanti\nUD SER ERA D3 AS. DAN\nBahwa Tergugat menolak dalil Penggugat dan meminta gugatan ditolak.",
+      "ocr_page_confidences": [
+        {
+          "page": 1,
+          "confidence": 87,
+          "status": "OK"
+        }
+      ],
+      "expected": {
+        "source_role": "LITIGATION_SUBMISSION",
+        "actors_include": [
+          "Penggugat",
+          "Tergugat"
+        ],
+        "actors_exclude": [
+          "UD SER ERA D3 AS. DAN",
+          "III Melawan Ninik Sugiyanti"
+        ],
+        "orientation": "CIVIL_DEFENSE",
+        "procedural_stage": "PLEADING",
+        "min_adverse": 1,
+        "span_noise_removed": true
+      }
+    },
+    {
+      "id": "ocr-mixed-line-runtime",
+      "text": "--- HALAMAN 1 ---\nJAWABAN TERGUGAT.\nPAI fY PERADI KA TANT P A &ASSOCIATES aa MENGEGGT Gaia brranaradd Kab Malang Provinsi Jawa Timur MANGA MPA EDAN Phone 082228007899 Email :afigladius07@gmail.com Jawaban Pertama Tergugat I, II, DAN III atas Gugatan Penggugat tertanggal 26 Februari 2026.\nBahwa Tergugat menolak dalil Penggugat dan meminta gugatan ditolak. Dalam eksepsi Tergugat memohon gugatan dinyatakan tidak dapat diterima.",
+      "ocr_page_confidences": [
+        {
+          "page": 1,
+          "confidence": 87,
+          "status": "OK"
+        }
+      ],
+      "expected": {
+        "source_role": "LITIGATION_SUBMISSION",
+        "actors_include": [
+          "Penggugat",
+          "Tergugat"
+        ],
+        "actors_exclude": [
+          "PAI fY PERADI",
+          "MENGEGGT Gaia",
+          "MANGA MPA EDAN"
+        ],
+        "orientation": "CIVIL_DEFENSE",
+        "procedural_stage": "PLEADING",
+        "min_adverse": 1,
+        "span_noise_removed": true,
+        "must_keep_text": [
+          "Jawaban Pertama Tergugat I, II, DAN III atas Gugatan Penggugat"
+        ],
+        "must_drop_text": [
+          "PAI fY PERADI",
+          "MENGEGGT Gaia",
+          "MANGA MPA EDAN",
+          "082228007899"
+        ]
+      }
+    },
+    {
+      "id": "ocr-wrapped-header-runtime",
+      "text": "--- HALAMAN 1 ---\nJAWABAN TERGUGAT.\n\nPAI fY PERADI KA TANT P A &ASSOCIATES aa\nMENGEGGT Gaia & IA W 4 Alamat :\nJl Sumedang No 389 Kel Cempokomulyo Kec Kepanjen brranaradd Kab Malang Provinsi Jawa Timur MANGA MPA EDAN Phone 082228007899 Email :afigladius07@gmail.com\nJawaban Pertama Tergugat I, II, DAN III atas Gugatan Penggugat tertanggal 26 Februari 2026.\n\nBahwa Tergugat menolak dalil Penggugat dan meminta gugatan ditolak. Dalam eksepsi Tergugat memohon gugatan dinyatakan tidak dapat diterima.",
+      "ocr_page_confidences": [
+        {
+          "page": 1,
+          "confidence": 87,
+          "status": "OK"
+        }
+      ],
+      "expected": {
+        "source_role": "LITIGATION_SUBMISSION",
+        "actors_include": [
+          "Penggugat",
+          "Tergugat"
+        ],
+        "actors_exclude": [
+          "PAI fY PERADI",
+          "MENGEGGT Gaia",
+          "MANGA MPA EDAN"
+        ],
+        "orientation": "CIVIL_DEFENSE",
+        "procedural_stage": "PLEADING",
+        "min_adverse": 1,
+        "span_noise_removed": true,
+        "must_keep_text": [
+          "Jawaban Pertama Tergugat I, II, DAN III atas Gugatan Penggugat"
+        ],
+        "must_drop_text": [
+          "PAI fY PERADI",
+          "MENGEGGT Gaia",
+          "MANGA MPA EDAN",
+          "082228007899"
+        ]
+      }
+    }
+  ],
+  "propagation_fixtures": [
+    {
+      "id": "single-source-sanitized-document",
+      "raw_input_text": "RAW OCR PAI fY PERADI KA TANT P A &ASSOCIATES aa MENGEGGT Gaia. Penggugat dan Tergugat.",
+      "sanitized_document_text": "JAWABAN TERGUGAT. Penggugat mengajukan gugatan. Tergugat membantah dalil Penggugat.",
+      "supplemental_narrative": "Catatan pengguna: fokus pada jawaban Tergugat.",
+      "expected": {
+        "must_include": [
+          "Catatan pengguna: fokus pada jawaban Tergugat.",
+          "JAWABAN TERGUGAT",
+          "Tergugat membantah dalil Penggugat"
+        ],
+        "must_exclude": [
+          "RAW OCR",
+          "PAI fY PERADI",
+          "MENGEGGT Gaia"
+        ]
+      }
+    }
+  ]
+}

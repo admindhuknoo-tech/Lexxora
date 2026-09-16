@@ -51,6 +51,10 @@ export interface LegalDraft {
   prompt?: string;
   content: string;
   status?: string;
+  client_id?: string;
+  client_name?: string;
+  case_id?: number;
+  source?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -75,6 +79,9 @@ export interface ContractAnalysis {
   }>;
   summary: string;
   raw_analysis?: string;
+  client_id?: string;
+  client_name?: string;
+  case_id?: number;
   created_at: string;
 }
 
@@ -88,6 +95,9 @@ export interface LegalResearchNote {
   summary: string;
   content?: string;
   source_text?: string;
+  client_id?: string;
+  client_name?: string;
+  case_id?: number;
   created_at: string;
 }
 
@@ -115,6 +125,10 @@ export interface ComplianceAssessment {
   missing_count?: number;
   completion_percentage?: number;
   summary?: string;
+  client_id?: string;
+  client_name?: string;
+  case_id?: number;
+  source?: string;
   created_at: string;
 }
 
@@ -133,6 +147,7 @@ export interface ClientCommunication {
   subject: string;
   message: string;
   case_ref?: string;
+  case_id?: number;
   created_at: string;
 }
 
@@ -149,6 +164,8 @@ export interface CaseAnalysisRecord {
   input_type: 'narrative' | 'document' | 'narrative+document';
   filename?: string;
   source_text: string;
+  client_id?: string;
+  client_name?: string;
   facts: string[];
   incriminating_facts?: string[];
   mitigating_facts?: string[];
@@ -185,6 +202,9 @@ export interface CaseAnalysisRecord {
   analysis_provenance?: any;
   case_readiness?: any;
   case_working_paper?: any;
+  analysis_readiness?: any;
+  pipeline_gate_readiness?: any;
+  working_paper_readiness?: any;
   regulatory_matches?: any[];
   regulatory_intelligence?: any;
   regulatory_corpus_status?: any;

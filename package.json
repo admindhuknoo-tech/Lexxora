@@ -5,21 +5,36 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && node scripts/precompress-static-v6122.mjs && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "lint": "tsc --noEmit",
     "audit:baseline": "node scripts/audit-baseline.mjs",
     "drafting:sources:sync": "node scripts/sync-official-drafting-sources.mjs",
     "audit:deep": "node scripts/audit-baseline.mjs && node scripts/audit-deep.mjs",
-    "cleanup:dead-frontend": "node scripts/cleanup-dead-frontend.mjs"
+    "cleanup:dead-frontend": "node scripts/cleanup-dead-frontend.mjs",
+    "audit:case-general": "tsx scripts/audit-case-general-v5.ts",
+    "audit:case-reasoning": "node scripts/audit-case-reasoning.mjs",
+    "audit:report-format": "tsx scripts/audit-report-format-v53.ts",
+    "audit:report-quality": "tsx scripts/audit-report-quality-v54.ts",
+    "audit:group-a": "node scripts/audit-v690-group-a-correctness.mjs",
+    "audit:readiness-domain-routing": "tsx scripts/audit-readiness-domain-routing-v691.ts",
+    "audit:group-b": "tsx scripts/audit-v610-group-b-strategic-output.ts",
+    "audit:group-c": "tsx scripts/audit-v611-source-quality-guard.ts && tsx scripts/audit-v6111-sanitized-propagation.ts && tsx scripts/audit-v611-regression-corpus.ts",
+    "audit:group-d": "node scripts/audit-v612-group-d-production-hardening.mjs",
+    "smoke:production": "node scripts/smoke-production.mjs",
+    "audit:consolidation": "node scripts/audit-v6121-canonical-consolidation.mjs",
+    "audit:performance": "node scripts/audit-v6122-performance-predeploy.mjs"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@types/multer": "^2.2.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "multer": "^2.3.0",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "@napi-rs/canvas": "^1.0.9",
+    "pdfjs-dist": "^6.3.289",
+    "tesseract.js": "^7.0.0",
+    "@tesseract.js-data/ind": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

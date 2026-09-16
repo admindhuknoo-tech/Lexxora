@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const root=process.cwd();
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
-const index=read('index.html');
+const index=[read('index.html'), read('public/lexicore.v6122.css'), read('public/lexicore.v6122.js')].join('\n');
 const server=read('server.ts');
 const db=read('server/db.ts');
 const types=read('server/types.ts');
@@ -12,14 +12,11 @@ const failures=[];
 const pass=[];
 const check=(name,cond,detail='')=>(cond?pass:failures).push({name,detail});
 
-// Parse the active inline application script for syntax without executing browser globals.
-const start=index.indexOf('<script>');
-const end=start>=0?index.indexOf('</script>',start+8):-1;
-check('active inline script located',start>=0&&end>start);
-if(start>=0&&end>start){
-  try{ new Function(index.slice(start+8,end)); check('active inline script syntax',true); }
-  catch(e){ check('active inline script syntax',false,String(e?.message||e)); }
-}
+// Parse the active external application script for syntax without executing browser globals.
+const appJs=read('public/lexicore.v6122.js');
+check('active external script located',appJs.length>1000 && /lexicore\.v6122\.js/.test(read('index.html')));
+try{ new Function(appJs); check('active external script syntax',true); }
+catch(e){ check('active external script syntax',false,String(e?.message||e)); }
 
 for(const p of ['client','draft','review','case','corpus','risk','research','norm']){
   check(`panel ${p} has nav binding`,index.includes(`data-panel="${p}"`));

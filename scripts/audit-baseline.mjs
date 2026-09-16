@@ -6,13 +6,14 @@ const read = p => fs.readFileSync(path.join(root,p),'utf8');
 const checks=[];
 const add=(name,ok,detail='')=>checks.push({name,ok,detail});
 
-const index=read('index.html');
+const index=[read('index.html'), read('public/lexicore.v6122.css'), read('public/lexicore.v6122.js')].join('\n');
 const server=read('server.ts');
 const caseAnalysis=read('server/caseAnalysis.ts');
 const exporters=read('server/exporters.ts');
 const db=read('server/db.ts');
 const ingest=read('server/documentIngestion.ts');
-const gemini=read('server/gemini.ts');
+const localReasoning=read('server/localReasoning.ts');
+const forensicReasoner=read('server/forensicReasoner.ts');
 const templates=JSON.parse(read('src/data/templates.json'));
 const draftingSources=JSON.parse(read('src/data/official-drafting-sources.json'));
 const templateRows=Object.values(templates);
@@ -25,7 +26,7 @@ add('drafting 9 ecosystems classified', ['PIDANA','PERDATA','PENGADILAN AGAMA','
 add('official drafting source registry', Object.keys(draftingSources.sources||{}).length >= 15, `sources=${Object.keys(draftingSources.sources||{}).length}`);
 add('official source provenance injected', templateRows.filter(x=>Array.isArray(x.official_source_details)&&x.official_source_details.length).length >= 250);
 add('draft template search/filter UI', /draftTemplateSearch/.test(index) && /draftCategoryFilter/.test(index));
-add('draft generator is template-aware', /templateFamily/.test(gemini) && /OFFICIAL_FORMAT_REFERENCE/.test(gemini));
+add('draft generator is local/template-aware', /generateLegalDraft/.test(localReasoning) && /template/.test(localReasoning));
 add('no raw binary UTF-8 upload decode in server routes', !/req\.file\.buffer\.toString\(['"]utf8['"]\)/.test(server));
 add('document ingestion module wired', server.includes('extractUploadedDocument') && ingest.includes('extractUploadedDocument'));
 add('case four-script summary', /summary/.test(caseAnalysis));
@@ -51,10 +52,16 @@ add('research uses source_text contract', /source_text/.test(server));
 add('research refuses empty source fallback', /tidak akan membuat ringkasan doktrin\/yurisprudensi tanpa materi sumber/.test(server));
 add('norm matrix contract', /rule_comparison_matrix/.test(server));
 add('norm metric not hard-coded 12', !/norm_conflict_analyses\s*:\s*12/.test(db));
-add('demo seed opt-in', /LEXICORE_SEED_DEMO\s*===\s*['"]1['"]/.test(db));
+add('no fabricated case seed', !/seedInitialCase|LEXICORE_SEED_DEMO/.test(db));
 add('official host health performs fetch', /api\/legal-sources\/health/.test(server) && /await fetch\(src\.url/.test(server));
-add('contract review ingestion honest UI', /PDF text-layer dibaca lokal/.test(index) && /AI OCR bila tersedia/.test(index));
-add('type-aware drafting fallback', /SOMASI|KUASA|GUGATAN/i.test(gemini));
+// Pre-existing stale check: this project moved scan/image OCR from Gemini Vision to fully
+// local Tesseract.js (see README_LOCAL_OCR.md) so the UI no longer says "AI OCR" — it correctly
+// discloses local-only OCR instead. Assertion updated to match the honest text actually shipped,
+// not the older Gemini-Vision-era wording.
+add('contract review ingestion honest UI', /PDF text-layer dibaca lokal/.test(index) && /OCR lokal Tesseract/.test(index) && /tanpa API key/.test(index));
+add('type-aware local drafting', /SOMASI|KUASA|GUGATAN/i.test(localReasoning));
+add('deterministic forensic reasoner wired', /reasonForensically/.test(caseAnalysis) && /no external generative-AI|No external generative-AI/i.test(forensicReasoner));
+add('no Gemini/API-key runtime dependency', !/GEMINI_API_KEY|GOOGLE_API_KEY|@google\/genai|Google Gemini/.test(server+caseAnalysis+localReasoning+forensicReasoner));
 
 
 add('robust frontend JSON error parser reads body once', /const raw=await r\.text\(\)/.test(index) && !/await r\.json\(\)[\s\S]{0,200}await r\.text\(\)/.test(index));

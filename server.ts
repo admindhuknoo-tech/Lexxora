@@ -1,57 +1,181 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import multer from 'multer';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
+import { randomUUID, createHash } from 'crypto';
 import { db } from './server/db';
 import {
-  getAI,
-  isAIAvailable,
+  isLocalReasoningAvailable,
+  getLocalReasoningStatus,
   generateLegalDraftAI,
   reviewContractAI,
-  generateCommunicationAI
-} from './server/gemini';
+  generateCommunicationAI,
+  summarizeSourceDeterministically
+} from './server/localReasoning';
 import { runCaseAnalysis } from './server/caseAnalysis';
 import { createDocxBuffer, createPdfBuffer, createWorkingDocumentDocxBuffer } from './server/exporters';
 import { extractUploadedDocument } from './server/documentIngestion';
 
+// Load local developer credentials first, then fall back to .env without overriding them.
+dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const MAX_UPLOAD_MB = Math.max(1, Math.min(100, Number(process.env.MAX_UPLOAD_MB || 50)));
+const allowedUploadExtensions = new Set(['.txt','.md','.csv','.json','.xml','.html','.htm','.rtf','.docx','.pdf','.png','.jpg','.jpeg','.webp','.tif','.tiff']);
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(String(file.originalname || '')).toLowerCase();
+    const mime = String(file.mimetype || '').toLowerCase();
+    const supported = allowedUploadExtensions.has(ext) || mime.startsWith('text/') || mime.startsWith('image/') || mime === 'application/pdf' || /wordprocessingml|rtf/.test(mime);
+    if (!supported) return cb(new Error(`Format berkas tidak didukung: ${ext || mime || 'tidak dikenal'}`));
+    cb(null, true);
+  }
 });
+
+// -----------------------------------------------------------------------------
+// Production hardening middleware (dependency-free to keep deployment stable).
+// -----------------------------------------------------------------------------
+if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
+
+app.use((req, res, next) => {
+  const requestId = String(req.headers['x-request-id'] || '').trim().slice(0, 96) || randomUUID();
+  res.locals.requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:");
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
+  if (process.env.NODE_ENV === 'production' && (req.secure || forwardedProto === 'https')) {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
+  next();
+});
+
+const allowedOrigins = new Set(String(process.env.ALLOWED_ORIGINS || '').split(',').map(x => x.trim()).filter(Boolean));
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return next();
+  if (allowedOrigins.size && !allowedOrigins.has(origin)) {
+    return res.status(403).json({ success:false, error:'Origin tidak diizinkan untuk mengakses LexiCore.' });
+  }
+  if (allowedOrigins.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  next();
+});
+
+app.use((req, res, next) => {
+  const started = process.hrtime.bigint();
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
+    console.log(JSON.stringify({
+      level: res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
+      event: 'http_request',
+      request_id: res.locals.requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration_ms: Number(durationMs.toFixed(1))
+    }));
+  });
+  next();
+});
+
+function createRateLimit(windowMs: number, max: number) {
+  const buckets = new Map<string, { count:number; resetAt:number }>();
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of buckets) if (value.resetAt <= now) buckets.delete(key);
+  }, Math.max(60_000, windowMs));
+  (cleanup as any).unref?.();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const key = `${req.ip || req.socket.remoteAddress || 'unknown'}:${req.path}`;
+    const now = Date.now();
+    const current = buckets.get(key);
+    const bucket = !current || current.resetAt <= now ? { count:0, resetAt:now + windowMs } : current;
+    bucket.count += 1;
+    buckets.set(key, bucket);
+    res.setHeader('RateLimit-Limit', String(max));
+    res.setHeader('RateLimit-Remaining', String(Math.max(0, max - bucket.count)));
+    res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
+    if (bucket.count > max) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
+      return res.status(429).json({ success:false, error:'Terlalu banyak permintaan pada proses berat. Tunggu sebentar lalu coba kembali.' });
+    }
+    next();
+  };
+}
+const expensiveAnalysisLimit = createRateLimit(60_000, Math.max(2, Number(process.env.ANALYSIS_RATE_LIMIT_PER_MIN || 6)));
+const externalHealthLimit = createRateLimit(60_000, Math.max(2, Number(process.env.EXTERNAL_HEALTH_RATE_LIMIT_PER_MIN || 10)));
 
 // Middleware
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
 // In-flight progress tracker for Case Analysis
-const progressMap = new Map<string, { percent: number; stage: string; detail: string }>();
+const progressMap = new Map<string, { percent: number; stage: string; detail: string; case_id?: number; error?: string }>();
+
+function scheduleProgressCleanup(progressId: string, delayMs: number): void {
+  const timer = setTimeout(() => progressMap.delete(progressId), delayMs);
+  // Cleanup timers are bookkeeping only and must not prevent graceful shutdown.
+  (timer as any).unref?.();
+}
 
 // -------------------------------------------------------------
 // 1. Health & AI Status
 // -------------------------------------------------------------
-app.get('/api/health', (req, res) => {
+const processStartedAt = new Date().toISOString();
+app.get('/api/live', (_req, res) => res.json({ status:'ok', service:'lexicore', check:'liveness' }));
+app.get('/api/ready', (_req, res) => {
+  const templateCount = Object.keys(db.getTemplates() || {}).length;
+  const regulationCount = db.getRegulations().length;
+  const ready = templateCount > 0 && regulationCount > 0;
+  return res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    check: 'readiness',
+    references: { templates: templateCount, regulations: regulationCount },
+    storage_mode: 'IN_MEMORY_TRANSIENT'
+  });
+});
+app.get('/api/health', (_req, res) => {
+  const memory = process.memoryUsage();
   res.json({
     status: 'ok',
-    version: '1.3.14-node-aistudio',
+    version: '1.4.0-local-forensic',
+    baseline: 'V6.12.2-PERFORMANCE-PREDEPLOY',
     system: 'LexiCore Lawyer Operating System',
-    gemini_available: isAIAvailable()
+    reasoning_core: 'LOCAL_DETERMINISTIC',
+    external_ai_required: false,
+    node_env: process.env.NODE_ENV || 'development',
+    started_at: processStartedAt,
+    uptime_seconds: Math.round(process.uptime()),
+    memory_mb: { rss: Math.round(memory.rss / 1048576), heap_used: Math.round(memory.heapUsed / 1048576) },
+    storage_mode: 'IN_MEMORY_TRANSIENT'
   });
 });
 
 app.get('/api/ai/status', (req, res) => {
-  const available = isAIAvailable();
+  const status = getLocalReasoningStatus();
   res.json({
     success: true,
-    available,
-    provider: available ? 'Google Gemini' : 'LexiCore Local Kernel',
-    model: available ? 'gemini-3.8-flash' : 'lexicore-v1.3-deterministic',
-    offline_fallback: true,
-    mode: available ? 'AI_ASSISTED' : 'LOCAL_DETERMINISTIC'
+    available: isLocalReasoningAvailable(),
+    provider: status.provider,
+    model: status.model,
+    external_ai_required: false,
+    api_key_required: false,
+    mode: 'LOCAL_DETERMINISTIC'
   });
 });
 
@@ -69,7 +193,7 @@ app.get('/api/license/status', (req, res) => {
 app.post('/api/license/install', (req, res) => {
   res.json({
     success: true,
-    message: 'Lisensi terverifikasi dan aktif di lingkungan AI Studio.',
+    message: 'Lisensi terverifikasi dan aktif untuk LexiCore Local Forensic Runtime.',
     data: db.getLicenseStatus()
   });
 });
@@ -102,17 +226,16 @@ app.put('/api/profile', handleProfileUpdate);
 app.post('/api/profile', handleProfileUpdate);
 
 app.get('/api/ocr/status', (req, res) => {
-  const ai = isAIAvailable();
   res.json({
     success: true,
     local_text_extraction: true,
     docx_local_extraction: true,
     pdf_text_layer_extraction: true,
-    scan_ocr_available: ai,
-    mode: ai ? 'LOCAL_TEXT_PLUS_AI_OCR' : 'LOCAL_TEXT_ONLY',
-    message: ai
-      ? 'TXT/RTF/DOCX/PDF text-layer dibaca lokal; scan/foto atau PDF tanpa text layer dapat dibaca dengan AI OCR.'
-      : 'TXT/RTF/DOCX/PDF text-layer dibaca lokal. OCR scan/foto memerlukan GEMINI_API_KEY.'
+    scan_ocr_available: true,
+    mode: 'LOCAL_TESSERACT_OCR',
+    api_key_required: false,
+    engine: 'Tesseract.js + PDF.js + @napi-rs/canvas',
+    message: 'TXT/RTF/DOCX/PDF text-layer dibaca lokal; scan/foto dan PDF image-only diproses OCR lokal. Tidak ada external AI/API key yang diperlukan.'
   });
 });
 
@@ -129,16 +252,50 @@ app.get('/api/dashboard/metrics', (req, res) => {
 // -------------------------------------------------------------
 // 4. Legal Drafting
 // -------------------------------------------------------------
-app.get('/api/drafting/templates', (req, res) => {
-  const templates = db.getTemplates();
-  const rows = Object.values(templates || {}) as any[];
-  res.json({
+let draftingTemplateIndexCache: { body:any; etag:string } | null = null;
+function getDraftingTemplateIndexCache() {
+  if (draftingTemplateIndexCache) return draftingTemplateIndexCache;
+  const templates = db.getTemplates() as Record<string, any>;
+  const entries = Object.entries(templates || {});
+  const summaries = Object.fromEntries(entries.map(([key, x]: [string, any]) => [key, {
+    id: x?.id,
+    name: x?.name || key,
+    display_name: x?.display_name || x?.name || key,
+    category: x?.category || 'Lainnya',
+    domain: x?.domain,
+    section: x?.section,
+    subsection: x?.subsection,
+    p1: x?.p1,
+    p2: x?.p2,
+    party1_label: x?.party1_label,
+    party2_label: x?.party2_label,
+    prompt_label: x?.prompt_label || x?.prompt,
+    duration: !!x?.duration,
+    forum_sensitive: !!x?.forum_sensitive,
+    source_grade: x?.source_grade,
+    catalog_warning: x?.catalog_warning,
+    official_source_count: Array.isArray(x?.official_source_details) ? x.official_source_details.length : 0
+  }]));
+  const rows = Object.values(summaries) as any[];
+  const body = {
     success: true,
-    templates,
+    data: summaries,
     count: rows.length,
-    official_reference_count: rows.filter((x:any) => Array.isArray(x?.official_source_details) && x.official_source_details.length).length,
+    official_reference_count: rows.filter((x:any) => Number(x?.official_source_count || 0) > 0).length,
     categories: Array.from(new Set(rows.map((x:any) => x?.category).filter(Boolean))).sort()
-  });
+  };
+  const serialized = JSON.stringify(body);
+  const etag = `"${createHash('sha1').update(serialized).digest('hex')}"`;
+  draftingTemplateIndexCache = { body, etag };
+  return draftingTemplateIndexCache;
+}
+
+app.get('/api/drafting/templates', (req, res) => {
+  const cached = getDraftingTemplateIndexCache();
+  res.setHeader('Cache-Control', 'private, max-age=300, must-revalidate');
+  res.setHeader('ETag', cached.etag);
+  if (String(req.headers['if-none-match'] || '') === cached.etag) return res.status(304).end();
+  return res.json(cached.body);
 });
 
 app.get('/api/drafting/template/:key', (req, res) => {
@@ -146,12 +303,16 @@ app.get('/api/drafting/template/:key', (req, res) => {
   const key = decodeURIComponent(req.params.key || '');
   const template = templates[key] || Object.values(templates).find((x:any) => x?.id === key || x?.name === key || x?.display_name === key);
   if (!template) return res.status(404).json({ success:false, error:'Template tidak ditemukan' });
+  const etag = `"${createHash('sha1').update(JSON.stringify(template)).digest('hex')}"`;
+  res.setHeader('Cache-Control', 'private, max-age=300, must-revalidate');
+  res.setHeader('ETag', etag);
+  if (String(req.headers['if-none-match'] || '') === etag) return res.status(304).end();
   return res.json({ success:true, template });
 });
 
 app.post('/api/generate/draft', async (req, res) => {
   try {
-    const { doc_type, party1, party2, effective_date, duration, prompt } = req.body || {};
+    const { doc_type, party1, party2, effective_date, duration, prompt, client_id, client_name, case_id } = req.body || {};
     const templates = db.getTemplates() as Record<string, any>;
     const template = templates[doc_type] || Object.values(templates).find((x:any) => x?.id === doc_type || x?.name === doc_type || x?.display_name === doc_type);
     const resolvedDocType = template?.display_name || template?.name || doc_type || 'Perjanjian';
@@ -167,6 +328,7 @@ app.post('/api/generate/draft', async (req, res) => {
       template
     });
 
+    const parsedCaseId = Number.parseInt(String(case_id ?? ''), 10);
     const saved = db.saveDraft({
       title: `${resolvedDocType} - ${party1 || 'P1'} & ${party2 || 'P2'}`,
       doc_type: resolvedDocType,
@@ -177,7 +339,10 @@ app.post('/api/generate/draft', async (req, res) => {
       duration,
       prompt,
       content,
-      status: 'DRAFT_KERJA'
+      status: 'DRAFT_KERJA',
+      client_id: client_id ? String(client_id).trim() : undefined,
+      client_name: client_name ? String(client_name).trim() : undefined,
+      case_id: Number.isInteger(parsedCaseId) && parsedCaseId > 0 ? parsedCaseId : undefined
     });
 
     res.json({
@@ -207,6 +372,7 @@ app.post('/api/drafts', (req, res) => {
     if (content.length < 20) {
       return res.status(400).json({ success:false, error:'Isi draft belum memadai untuk disimpan.' });
     }
+    const parsedCaseId = Number.parseInt(String(body.case_id ?? ''), 10);
     const saved = db.saveDraft({
       title: String(body.title || body.doc_type || 'Legal Draft').trim(),
       doc_type: String(body.doc_type || 'Legal Draft').trim(),
@@ -217,7 +383,10 @@ app.post('/api/drafts', (req, res) => {
       duration: body.duration !== undefined ? String(body.duration) : undefined,
       prompt: body.prompt ? String(body.prompt) : undefined,
       content,
-      status: String(body.status || 'saved')
+      status: String(body.status || 'saved'),
+      client_id: body.client_id ? String(body.client_id).trim() : undefined,
+      client_name: body.client_name ? String(body.client_name).trim() : undefined,
+      case_id: Number.isInteger(parsedCaseId) && parsedCaseId > 0 ? parsedCaseId : undefined
     });
     return res.status(201).json({ success:true, draft_id:saved.id, data:saved, draft:saved });
   } catch (err:any) {
@@ -294,7 +463,7 @@ app.delete('/api/drafts/:id', (req, res) => {
 // -------------------------------------------------------------
 // 5. Contract Review
 // -------------------------------------------------------------
-app.post('/api/review', upload.single('file') as any, async (req, res) => {
+app.post('/api/review', expensiveAnalysisLimit, upload.single('file') as any, async (req, res) => {
   try {
     let text = req.body?.source_text || req.body?.text || '';
     let filename = req.body?.filename || 'dokumen-kontrak.txt';
@@ -324,10 +493,14 @@ app.post('/api/review', upload.single('file') as any, async (req, res) => {
         recommended_redraft: r.mitigation || 'Susun ulang klausul secara proporsional dan verifikasi terhadap transaksi.'
       }))
     };
+    const parsedCaseId = Number.parseInt(String(req.body?.case_id ?? ''), 10);
     const saved = db.saveContractAnalysis({
       ...normalizedReview,
       title: filename,
-      source_text: text
+      source_text: text,
+      client_id: req.body?.client_id ? String(req.body.client_id).trim() : undefined,
+      client_name: req.body?.client_name ? String(req.body.client_name).trim() : undefined,
+      case_id: Number.isInteger(parsedCaseId) && parsedCaseId > 0 ? parsedCaseId : undefined
     });
 
     res.json({
@@ -466,30 +639,11 @@ app.post('/api/research/summarize', async (req, res) => {
   const { title } = req.body || {};
   const text = String(req.body?.source_text || req.body?.text || '');
   const type = String(req.body?.source_type || req.body?.type || 'Yurisprudensi / Doktrin');
-  const ai = getAI();
-  let summary = '';
-
-  if (ai && text && text.length > 50) {
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: `Buat ringkasan yurisprudensi / doktrin hukum Indonesia berikut secara komprehensif:\nJudul: ${title || 'Riset Hukum'}\nTeks:\n${text.substring(0, 12000)}`,
-        config: { temperature: 0.2 }
-      });
-      summary = response.text?.trim() || '';
-    } catch (e) {
-      console.warn('Gemini research summary error:', e);
-    }
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return res.status(400).json({ success:false, error:'Teks sumber wajib diisi. LexiCore tidak akan membuat ringkasan doktrin/yurisprudensi tanpa materi sumber.' });
   }
-
-  if (!summary) {
-    const normalized = text.replace(/\s+/g, ' ').trim();
-    if (!normalized) {
-      return res.status(400).json({ success:false, error:'Teks sumber wajib diisi. LexiCore tidak akan membuat ringkasan doktrin/yurisprudensi tanpa materi sumber.' });
-    }
-    const excerpt = normalized.slice(0, 4000);
-    summary = `Ringkasan berbasis sumber yang diberikan (tanpa inferensi kaidah baru): ${excerpt}${normalized.length > excerpt.length ? '…' : ''}`;
-  }
+  const summary = summarizeSourceDeterministically(normalized, 4000);
 
   const sourceType = type || 'Yurisprudensi / Doktrin';
   const saved:any = db.saveLegalResearch({
@@ -536,7 +690,7 @@ app.get('/api/legal-sources', (req, res) => {
   });
 });
 
-app.get('/api/legal-sources/health', async (req, res) => {
+app.get('/api/legal-sources/health', externalHealthLimit, async (req, res) => {
   const sources = [
     { id:'jdih_bpk', name:'JDIH BPK RI', url:'https://peraturan.bpk.go.id', authoritative:true },
     { id:'jdihn', name:'JDIHN Kemenkumham', url:'https://jdihn.go.id', authoritative:true },
@@ -575,7 +729,7 @@ app.get('/api/compliance/questions', (req, res) => {
 });
 
 app.post('/api/compliance/assess', (req, res) => {
-  const { category, answers = {}, entity, custom_controls = [], preview = false } = req.body || {};
+  const { category, answers = {}, entity, custom_controls = [], preview = false, client_id, client_name, case_id } = req.body || {};
   const rules = db.getComplianceRules();
   const cat = category || 'General Corporate';
   const categoryRules = rules.rules?.[cat] || rules.rules?.['General Corporate'] || [];
@@ -678,7 +832,10 @@ app.post('/api/compliance/assess', (req, res) => {
     missing_count: missingSystem.length,
     completion_percentage: categoryRules.length ? Math.round((answeredSystem / categoryRules.length) * 100) : 100,
     professional_verification:'PENDING',
-    summary:`Assessment ${cat}: completion ${categoryRules.length ? Math.round((answeredSystem/categoryRules.length)*100) : 100}%; compliance score ${score}/100; risk exposure ${riskPercent}/100 (${risk_level}).`
+    summary:`Assessment ${cat}: completion ${categoryRules.length ? Math.round((answeredSystem/categoryRules.length)*100) : 100}%; compliance score ${score}/100; risk exposure ${riskPercent}/100 (${risk_level}).`,
+    client_id: client_id ? String(client_id).trim() : undefined,
+    client_name: client_name ? String(client_name).trim() : undefined,
+    case_id: Number.isInteger(Number.parseInt(String(case_id ?? ''), 10)) && Number.parseInt(String(case_id ?? ''), 10) > 0 ? Number.parseInt(String(case_id), 10) : undefined
   };
   const result = preview ? { ...payload, id:0, created_at:new Date().toISOString(), preview:true } : db.saveComplianceAssessment(payload);
   return res.json({ success:true, assessment:result, data:result, preview:Boolean(preview) });
@@ -704,11 +861,12 @@ app.get('/api/communications', (req, res) => {
 });
 
 app.post('/api/communications', (req, res) => {
-  const { client_name, legal_position, whatsapp_number, document_type, subject, message, client_id, case_ref, client_email, client_address, matter, status } = req.body || {};
+  const { client_name, legal_position, whatsapp_number, document_type, subject, message, client_id, case_ref, case_id, client_email, client_address, matter, status } = req.body || {};
   if (!message || String(message).trim() === '') {
     return res.status(400).json({ success: false, error: 'Isi pesan komunikasi wajib diisi' });
   }
 
+  const parsedCaseId = Number.parseInt(String(case_id ?? ''), 10);
   const saved = db.saveClientCommunication({
     client_id: client_id || `CLI-${Date.now().toString().slice(-4)}`,
     client_name: client_name || 'Klien',
@@ -721,7 +879,8 @@ app.post('/api/communications', (req, res) => {
     document_type: document_type || 'Surat Pemberitahuan',
     subject: subject || 'Pemberitahuan Perkembangan Perkara',
     message,
-    case_ref: case_ref || matter
+    case_ref: case_ref || matter,
+    case_id: Number.isInteger(parsedCaseId) && parsedCaseId > 0 ? parsedCaseId : undefined
   });
 
   res.json({
@@ -751,6 +910,7 @@ app.put('/api/communications/:id', (req, res) => {
     subject: body.subject !== undefined ? String(body.subject) : current.subject,
     matter: body.matter !== undefined ? String(body.matter) : current.matter,
     case_ref: body.case_ref !== undefined ? String(body.case_ref) : (body.matter !== undefined ? String(body.matter) : current.case_ref),
+    case_id: body.case_id !== undefined ? (Number.isInteger(Number.parseInt(String(body.case_id), 10)) && Number.parseInt(String(body.case_id), 10) > 0 ? Number.parseInt(String(body.case_id), 10) : undefined) : current.case_id,
     status: body.status !== undefined ? String(body.status) : current.status,
     message
   });
@@ -849,20 +1009,42 @@ app.get('/api/case-analysis', (req, res) => {
 
 app.get('/api/case-analysis/progress/:token', (req, res) => {
   const token = req.params.token;
-  const progress = progressMap.get(token) || { percent: 100, stage: 'COMPLETE', detail: 'Proses selesai.' };
-  res.json({
-    success: true,
-    data: progress
-  });
+  const progress = progressMap.get(token) || { percent: 0, stage: 'UNKNOWN', detail: 'Progress token tidak ditemukan.' };
+  res.json({ success: true, data: progress });
 });
 
-app.post('/api/case-analysis', upload.single('file') as any, async (req, res) => {
+// Recovery endpoint: a Case Analysis may finish even if the original HTTP response
+// is interrupted by a browser/proxy/network reset. The UI can recover the stored
+// result using the same progress token instead of resubmitting a duplicate job.
+app.get('/api/case-analysis/result/:token', (req, res) => {
+  const token = req.params.token;
+  const progress = progressMap.get(token);
+  if (!progress) return res.status(404).json({ success:false, error:'Progress token tidak ditemukan atau sudah kedaluwarsa.' });
+  if (progress.stage === 'ERROR') return res.status(500).json({ success:false, error:progress.error || progress.detail || 'Case Analysis gagal.' });
+  if (progress.stage !== 'COMPLETE' || !progress.case_id) {
+    return res.status(202).json({ success:true, pending:true, data:progress });
+  }
+  const result = db.getCaseAnalysis(progress.case_id);
+  if (!result) return res.status(404).json({ success:false, error:'Hasil Case Analysis belum tersedia pada penyimpanan.' });
+  return res.json({ success:true, pending:false, data:result, case_id:progress.case_id });
+});
+
+app.post('/api/case-analysis', expensiveAnalysisLimit, upload.single('file') as any, async (req, res) => {
   const progressId = (req.headers['x-lexicore-progress-id'] as string) || `prog-${Date.now()}`;
-  
+  const existing = progressMap.get(progressId);
+  if (existing && existing.stage !== 'ERROR' && existing.stage !== 'COMPLETE') {
+    return res.status(409).json({ success:false, error:'Case Analysis dengan token yang sama masih berjalan.', progress:existing });
+  }
+  if (existing?.stage === 'COMPLETE' && existing.case_id) {
+    const prior = db.getCaseAnalysis(existing.case_id);
+    if (prior) return res.json({ success:true, data:prior, case_id:existing.case_id, recovered:true });
+  }
+
   progressMap.set(progressId, { percent: 15, stage: 'UPLOAD_STORED', detail: 'Dokumen tersimpan, membaca materi perkara.' });
 
   try {
-    let narrative = req.body?.narrative || '';
+    const supplementalNarrative = String(req.body?.narrative || '').trim();
+    let narrative = supplementalNarrative;
     let title = req.body?.title || 'Case Analysis Perkara';
     let filename = '';
 
@@ -870,7 +1052,18 @@ app.post('/api/case-analysis', upload.single('file') as any, async (req, res) =>
     if (req.file) {
       filename = req.file.originalname;
       progressMap.set(progressId, { percent: 28, stage: 'DOCUMENT_READING', detail: 'Mengekstrak teks dokumen tanpa memasukkan data biner ke analisis.' });
-      documentIngestion = await extractUploadedDocument(req.file.buffer, req.file.originalname, req.file.mimetype);
+      documentIngestion = await extractUploadedDocument(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+        (ocrProgress) => {
+          progressMap.set(progressId, {
+            percent: Math.max(28, Math.min(44, Number(ocrProgress.percent || 28))),
+            stage: ocrProgress.stage,
+            detail: ocrProgress.detail
+          });
+        }
+      );
       narrative = (narrative + '\n\n' + documentIngestion.text).trim();
     }
 
@@ -892,11 +1085,16 @@ app.post('/api/case-analysis', upload.single('file') as any, async (req, res) =>
       filename,
       input_type: req.file ? (req.body?.narrative?.trim() ? 'narrative+document' : 'document') : 'narrative',
       regulatory_mode: req.body?.regulatory_mode || 'hybrid',
-      document_ingestion: documentIngestion || undefined
+      official_source_strategy: String(req.body?.manual_official_sources || '').split(/\r?\n|;/).map((x:string)=>x.trim()).filter(Boolean).length ? 'manual_plus_auto' : 'auto',
+      manual_official_sources: String(req.body?.manual_official_sources || '').split(/\r?\n|;/).map((x:string)=>x.trim()).filter(Boolean).slice(0,20),
+      document_ingestion: documentIngestion || undefined,
+      supplemental_narrative: supplementalNarrative || undefined,
+      client_id: req.body?.client_id ? String(req.body.client_id).trim() : undefined,
+      client_name: req.body?.client_name ? String(req.body.client_name).trim() : undefined
     });
 
-    progressMap.set(progressId, { percent: 100, stage: 'COMPLETE', detail: 'Working paper siap ditinjau.' });
-    setTimeout(() => progressMap.delete(progressId), 10000);
+    progressMap.set(progressId, { percent: 100, stage: 'COMPLETE', detail: 'Working paper siap ditinjau.', case_id: result.id });
+    scheduleProgressCleanup(progressId, 5 * 60 * 1000);
 
     res.json({
       success: true,
@@ -904,7 +1102,8 @@ app.post('/api/case-analysis', upload.single('file') as any, async (req, res) =>
       case_id: result.id
     });
   } catch (err: any) {
-    progressMap.delete(progressId);
+    progressMap.set(progressId, { percent: 100, stage: 'ERROR', detail: err.message || 'Gagal menjalankan Case Analysis', error: err.message || 'Gagal menjalankan Case Analysis' });
+    scheduleProgressCleanup(progressId, 2 * 60 * 1000);
     console.error('Case analysis error:', err);
     res.status(500).json({
       success: false,
@@ -923,6 +1122,149 @@ app.get('/api/case-analysis/:case_id/regulatory-snapshot', (req, res) => {
     success: true,
     data: c.case_regulatory_snapshot || {}
   });
+});
+
+// -------------------------------------------------------------
+// Living Lifecycle bindings: Client (1) / Draft (2) / Contract Review (3) /
+// Case Analysis (4) cross-reference each other via client_id + case_id, and
+// Case Analysis can push its findings straight into Compliance & Risk (6).
+// -------------------------------------------------------------
+
+// Everything on record for one case, across every other menu. Menu 1
+// (Client) uses this to let an intake worker "call up" a case's generated
+// documents when the client requests them.
+app.get('/api/case-analysis/:case_id/related', (req, res) => {
+  const id = Number.parseInt(req.params.case_id, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ success:false, error:'ID Case Analysis tidak valid.' });
+  const c = db.getCaseAnalysis(id);
+  if (!c) return res.status(404).json({ success:false, error:'Case Analysis tidak ditemukan.' });
+  res.json({ success:true, data: db.getCaseRelatedRecords(id) });
+});
+
+// Directory of distinct clients seen anywhere in the system, with a rollup
+// of how many records exist for them per module — feeds the Client-panel
+// "cari klien / kaitkan kasus" picker.
+app.get('/api/clients', (req, res) => {
+  res.json({ success:true, data: db.getClientDirectory() });
+});
+
+// Full cross-module timeline for one client_id.
+app.get('/api/clients/:clientId/timeline', (req, res) => {
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) return res.status(400).json({ success:false, error:'client_id wajib diisi.' });
+  res.json({ success:true, data: db.getClientTimeline(clientId) });
+});
+
+// Case Analysis (4) -> Legal Drafting (2): compose a working draft directly
+// from a case's proven parties, legal issues and recommendations instead of
+// starting the Draft panel from a blank template. The new draft inherits
+// the case's client_id/case_id so the lifecycle stays linked.
+app.post('/api/case-analysis/:case_id/generate-draft', async (req, res) => {
+  try {
+    const caseId = Number.parseInt(req.params.case_id, 10);
+    if (!Number.isInteger(caseId) || caseId <= 0) return res.status(400).json({ success:false, error:'ID Case Analysis tidak valid.' });
+    const c = db.getCaseAnalysis(caseId);
+    if (!c) return res.status(404).json({ success:false, error:'Case Analysis tidak ditemukan.' });
+
+    const templates = db.getTemplates() as Record<string, any>;
+    const requestedType = String(req.body?.doc_type || 'Legal Opinion');
+    const template = templates[requestedType] || Object.values(templates).find((x:any) => x?.id === requestedType || x?.name === requestedType || x?.display_name === requestedType);
+    const resolvedDocType = template?.display_name || template?.name || requestedType;
+
+    const actors: any[] = Array.isArray((c as any).actor_matrix) ? (c as any).actor_matrix : [];
+    const party1 = String(req.body?.party1 || c.client_name || actors[0]?.actor || 'Klien').trim();
+    const party2 = String(req.body?.party2 || actors[1]?.actor || 'Pihak lawan/terkait').trim();
+
+    const issueLines = (c.legal_issues || []).slice(0,6).map((li,i) => `${i+1}. ${li.issue}${li.conclusion ? ' — ' + li.conclusion : ''}`).join('\n');
+    const recLines = (c.recommendations || []).slice(0,6).map((r,i) => `${i+1}. ${r}`).join('\n');
+    const prompt = [
+      `Sumber: Case Analysis #${caseId} — ${c.title}`,
+      c.summary ? `Ringkasan perkara: ${c.summary}` : '',
+      issueLines ? `Isu hukum yang teridentifikasi:\n${issueLines}` : '',
+      recLines ? `Rekomendasi dari Case Analysis:\n${recLines}` : '',
+      'Draft ini disusun dari hasil Case Analysis dan tetap harus diverifikasi terhadap dokumen asli, kewenangan, forum, tenggang, dan hukum positif sebelum digunakan.'
+    ].filter(Boolean).join('\n\n');
+
+    const profile = db.getProfile();
+    const content = await generateLegalDraftAI({ doc_type: resolvedDocType, party1, party2, prompt, profile, template });
+
+    const saved = db.saveDraft({
+      title: `${resolvedDocType} - Case #${caseId} - ${party1}`,
+      doc_type: resolvedDocType,
+      template_key: template?.name || template?.id || requestedType,
+      party1,
+      party2,
+      prompt,
+      content,
+      status: 'DRAFT_KERJA',
+      client_id: c.client_id,
+      client_name: c.client_name,
+      case_id: caseId,
+      source: 'case_analysis'
+    });
+
+    db.logAudit('DRAFT_FROM_CASE', `Legal draft disusun dari Case Analysis #${caseId}: ${saved.title}`);
+    res.json({ success:true, draft_id: saved.id, draft: saved, content });
+  } catch (err:any) {
+    res.status(500).json({ success:false, error: err.message || 'Gagal menyusun draft dari Case Analysis.' });
+  }
+});
+
+// Case Analysis (4) -> Compliance & Risk (6): turn the case's own risk
+// matrix / overall risk score directly into a Compliance Assessment record,
+// instead of requiring the risk team to re-answer the whole questionnaire
+// from scratch for a matter that was already analyzed.
+app.post('/api/case-analysis/:case_id/generate-compliance', (req, res) => {
+  try {
+    const caseId = Number.parseInt(req.params.case_id, 10);
+    if (!Number.isInteger(caseId) || caseId <= 0) return res.status(400).json({ success:false, error:'ID Case Analysis tidak valid.' });
+    const c = db.getCaseAnalysis(caseId);
+    if (!c) return res.status(404).json({ success:false, error:'Case Analysis tidak ditemukan.' });
+
+    const rows = Array.isArray(c.risk_matrix) ? c.risk_matrix : [];
+    const matrix = rows.map((r:any) => ({
+      control_group: 'Case Analysis',
+      risk_identification: r.clause || r.finding || 'Risiko dari Case Analysis',
+      answer_label: r.finding || '-',
+      control_status: r.level === 'HIGH' ? 'NON_COMPLIANT' : r.level === 'MEDIUM' ? 'PARTIAL' : 'COMPLIANT',
+      risk_level: r.level || 'MEDIUM',
+      legal_justification: r.finding || 'Temuan risiko dari Case Analysis.',
+      legal_basis: 'Lihat applicable_law pada Case Analysis terkait — perlu diverifikasi ulang.',
+      sanction_basis: 'Konsekuensi hukum/operasional perlu diverifikasi berdasarkan regulasi yang berlaku.',
+      mitigation_checklist: r.mitigation ? [r.mitigation] : ['Verifikasi temuan dan dokumentasikan tindak lanjut.'],
+      source: 'CASE_ANALYSIS'
+    }));
+    const legacyMatrix = matrix.map((r:any) => ({ area:r.control_group, rule:r.risk_identification, status:r.control_status, severity:r.risk_level, mitigation:(r.mitigation_checklist||[]).join('; ') }));
+    const score = Math.max(0, Math.min(100, 100 - Number(c.overall_risk_score || 0)));
+    const risk_level:'LOW'|'MEDIUM'|'HIGH' = Number(c.overall_risk_score||0) >= 67 ? 'HIGH' : Number(c.overall_risk_score||0) >= 34 ? 'MEDIUM' : 'LOW';
+
+    const saved = db.saveComplianceAssessment({
+      entity: req.body?.entity || c.client_name || c.title,
+      title: `Compliance & Risk — Case #${caseId}: ${c.title}`,
+      category: String(req.body?.category || 'Litigation & Dispute Risk'),
+      score,
+      risk_level,
+      matrix: legacyMatrix,
+      risk_matrix: matrix,
+      custom_controls: [],
+      system_question_count: matrix.length,
+      custom_question_count: 0,
+      answered_count: matrix.length,
+      missing_count: 0,
+      completion_percentage: 100,
+      professional_verification: 'PENDING',
+      summary: `Diturunkan langsung dari Case Analysis #${caseId}. Overall risk score perkara: ${c.overall_risk_score ?? '-'}/100 (${risk_level}). Tetap memerlukan verifikasi profesional sebelum dipakai sebagai kesimpulan kepatuhan.`,
+      client_id: c.client_id,
+      client_name: c.client_name,
+      case_id: caseId,
+      source: 'case_analysis'
+    } as any);
+
+    db.logAudit('COMPLIANCE_FROM_CASE', `Compliance assessment disusun dari Case Analysis #${caseId}`);
+    res.json({ success:true, assessment: saved, data: saved });
+  } catch (err:any) {
+    res.status(500).json({ success:false, error: err.message || 'Gagal menyusun compliance assessment dari Case Analysis.' });
+  }
 });
 
 app.get('/api/case-analysis/export/:fmt/:case_id', (req, res) => {
@@ -1076,12 +1418,13 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   const code = String(err?.code || '');
   const type = String(err?.type || '');
   if (code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ success:false, error:'Ukuran berkas melebihi batas 50 MB. Ringkas atau pecah dokumen sebelum diunggah.' });
+    return res.status(413).json({ success:false, error:`Ukuran berkas melebihi batas ${MAX_UPLOAD_MB} MB. Ringkas atau pecah dokumen sebelum diunggah.` });
   }
   if (type === 'entity.too.large' || err?.status === 413) {
     return res.status(413).json({ success:false, error:'Payload permintaan terlalu besar. Gunakan upload dokumen atau endpoint berbasis ID; jangan kirim ulang working paper lengkap.' });
   }
-  console.error('Unhandled API error:', err);
+  // Unhandled API error: logged as structured JSON without request bodies or stack disclosure.
+  console.error(JSON.stringify({ level:'error', event:'api_error', request_id:res.locals.requestId, path:req.path, message:String(err?.message || err), code:String(err?.code || '') }));
   const status = Number(err?.status || err?.statusCode || 500);
   return res.status(status >= 400 && status < 600 ? status : 500).json({
     success:false,
@@ -1101,17 +1444,69 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    // Serve build-time Brotli/Gzip variants without adding runtime compression dependencies.
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      const pathname = decodeURIComponent(String(req.path || '/'));
+      const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+      if (!/\.(?:html|css|js|json|svg)$/i.test(rel)) return next();
+      const absolute = path.resolve(distPath, rel);
+      if (!absolute.startsWith(path.resolve(distPath) + path.sep) && absolute !== path.resolve(distPath, 'index.html')) return next();
+      const accept = String(req.headers['accept-encoding'] || '');
+      const candidate = /\bbr\b/.test(accept) && fs.existsSync(absolute + '.br')
+        ? { file:absolute + '.br', encoding:'br' }
+        : /\bgzip\b/.test(accept) && fs.existsSync(absolute + '.gz')
+          ? { file:absolute + '.gz', encoding:'gzip' }
+          : null;
+      if (!candidate) return next();
+      const ext = path.extname(absolute).toLowerCase();
+      const types: Record<string,string> = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.svg':'image/svg+xml' };
+      res.setHeader('Content-Encoding', candidate.encoding);
+      res.setHeader('Vary', 'Accept-Encoding');
+      if (types[ext]) res.setHeader('Content-Type', types[ext]);
+      const base = path.basename(absolute);
+      if (base === 'index.html') res.setHeader('Cache-Control', 'no-cache');
+      else if (/\.v\d+/i.test(base) || /\.[a-f0-9]{8,}\./i.test(base)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      else res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.sendFile(candidate.file);
+    });
+    app.use(express.static(distPath, {
+      etag: true,
+      maxAge: '1h',
+      setHeaders: (res, filePath) => {
+        const base = path.basename(filePath);
+        if (base === 'index.html') res.setHeader('Cache-Control', 'no-cache');
+        else if (/\.v\d+/i.test(base) || /\.[a-f0-9]{8,}\./i.test(base)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        else res.setHeader('Cache-Control', 'public, max-age=3600');
+      }
+    }));
+    app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`LexiCore Lawyer Operating System running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(JSON.stringify({ level:'info', event:'server_started', port:PORT, node_env:process.env.NODE_ENV || 'development', baseline:'V6.12.2-PERFORMANCE-PREDEPLOY' }));
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(JSON.stringify({ level:'info', event:'server_shutdown', signal }));
+    const force = setTimeout(() => process.exit(1), 10_000);
+    (force as any).unref?.();
+    server.close(() => {
+      clearTimeout(force);
+      process.exit(0);
+    });
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch(err => {
-  console.error('Failed to start LexiCore server:', err);
+  console.error(JSON.stringify({ level:'error', event:'server_start_failed', message:String(err?.message || err) }));
+  process.exitCode = 1;
 });

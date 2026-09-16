@@ -106,158 +106,28 @@ class LexicoreDB {
       console.warn('Failed to load compliance.json:', e);
     }
 
-    // Demo data is opt-in only. Production/default workspaces must not start with fabricated case history.
-    if (process.env.LEXICORE_SEED_DEMO === '1') this.seedInitialCase();
+    // Case history starts empty. LexiCore never seeds fabricated legal matters.
   }
 
-  private seedInitialCase() {
-    const seedCase: CaseAnalysisRecord = {
-      id: this.nextId.caseAnalysis++,
-      title: 'Sengketa Penguasaan Tanah Waris dan Peralihan Hak',
-      input_type: 'narrative',
-      source_text: 'Terdapat sebidang tanah pertanian/sawah bersertifikat hak milik atas nama ayah yang telah meninggal dunia. Pewaris meninggalkan seorang anak laki-laki usia 8 tahun dan seorang saudara kandung yang mengklaim telah menguasai dan menggarap sawah tersebut selama 5 tahun serta berusaha mengalihkan hak ke pihak ketiga dengan surat di bawah tangan tanpa persetujuan wali anak yang sah.',
-      facts: [
-        'Objek berupa sebidang tanah pertanian/sawah bersertifikat Hak Milik atas nama ayah kandung (pewaris).',
-        'Pewaris telah meninggal dunia dan meninggalkan satu orang anak laki-laki kandung berusia 8 tahun (di bawah umur/belum dewasa).',
-        'Saudara kandung pewaris (paman) menguasai fisik sawah selama 5 tahun terakhir.',
-        'Terdapat upaya paman mengalihkan hak objek sawah kepada pihak ketiga berdasarkan surat di bawah tangan tanpa penetapan perwalian pengadilan.'
-      ],
-      incriminating_facts: [
-        'Penguasaan fisik lahan sawah telah berlangsung 5 tahun di bawah saudara kandung pewaris tanpa perlawanan aktif sebelumnya.'
-      ],
-      mitigating_facts: [
-        'SHM masih sah terdaftar atas nama ayah kandung anak.',
-        'Anak kandung adalah ahli waris golongan I yang sah menurut Pasal 852 KUHPerdata.',
-        'Peralihan hak atas tanah milik anak di bawah umur tanpa penetapan izin jual dari Pengadilan Negeri batal demi hukum.'
-      ],
-      legal_issues: [
-        {
-          issue: 'Kedudukan hukum anak di bawah umur (8 tahun) sebagai ahli waris sah dan kebutuhan penetapan perwalian.',
-          rule: 'Pasal 852 KUHPerdata jo. Pasal 47 & Pasal 48 UU No. 1/1974 tentang Perkawinan jo. UU No. 16/2019.',
-          analysis: 'Anak kandung berhak mutlak mewarisi harta peninggalan ayahnya (Legitieme Portie). Karena masih berusia 8 tahun, anak belum cakap melakukan perbuatan hukum sendiri dan memerlukan wali yang ditetapkan pengadilan.',
-          conclusion: 'Hak kepemilikan mutlak berada pada anak; segala transaksi pengalihan hak oleh pihak ketiga tanpa persetujuan perwalian pengadilan adalah tidak sah dan melawan hukum.'
-        },
-        {
-          issue: 'Keabsahan pengalihan hak tanah pertanian bersertifikat melalui surat di bawah tangan oleh pihak non-pemilik.',
-          rule: 'Pasal 1365 KUHPerdata (PMH) jo. Pasal 19 & Pasal 37 PP No. 24/1997 tentang Pendaftaran Tanah.',
-          analysis: 'Peralihan hak milik atas tanah wajib dibuktikan dengan Akta PPAT dan didaftarkan ke Kantor Pertanahan (BPN). Surat di bawah tangan dari pihak yang bukan pemilik sah tidak memiliki kekuatan hukum untuk memindahkan hak.',
-          conclusion: 'Tindakan saudara kandung mengalihkan tanah merupakan Perbuatan Melawan Hukum (PMH) dan berpotensi memicu tindak pidana penggelapan hak atas barang tidak bergerak (Pasal 385 KUHP).'
-        }
-      ],
-      applicable_law: [
-        { domain: 'Hukum Waris & Perdata', source: 'KUHPerdata Pasal 830, 852 (Hak Waris Golongan I)', status: 'BERLAKU' },
-        { domain: 'Hukum Perkawinan & Perwalian', source: 'UU No. 1/1974 jo UU 16/2019 Pasal 47, 48 (Kewalian Anak)', status: 'BERLAKU' },
-        { domain: 'Hukum Agraria & Pertanahan', source: 'PP No. 24/1997 Pasal 37 (Akta PPAT untuk Peralihan Hak)', status: 'BERLAKU' },
-        { domain: 'Hukum Acara Perdata', source: 'HIR Pasal 118 / RBg Pasal 142 (Kompetensi Pengadilan Negeri Objek Tanah)', status: 'BERLAKU' }
-      ],
-      summary: 'Perkara menyangkut tanah waris bersertifikat atas nama pewaris yang dikuasai saudara kandung dan diduga hendak dialihkan kepada pihak ketiga, sementara ahli waris utama masih di bawah umur. Isu utama mencakup hak waris, perwalian, keabsahan peralihan hak, perlindungan aset, dan pembuktian.',
-      legal_analysis: 'Secara yuridis, hak atas tanah sawah bersertifikat milik almarhum ayah demi hukum beralih kepada anak laki-lakinya selaku ahli waris sah. Klaim penguasaan fisik oleh saudara kandung tidak menggugurkan hak kepemilikan pemegang hak yang sah pada sertifikat.',
-      arguments_for: [
-        'Sertifikat Hak Milik adalah alat bukti hak yang kuat dan otentik menurut Pasal 32 ayat (1) PP 24/1997.',
-        'Anak kandung terlindungi secara hukum dari pengalihan harta warisan sepihak oleh pihak non-wali sah.'
-      ],
-      arguments_against: [
-        'Perlu antisipasi dalil itikad baik pembeli pihak ketiga dan dalil pemeliharaan/ongkos garap selama 5 tahun.'
-      ],
-      evidence_needed: [
-        'Asli Sertifikat Hak Milik (SHM) objek sawah.',
-        'Kutipan Akta Kematian Pewaris dari Disdukcapil.',
-        'Kutipan Akta Kelahiran Anak Laki-Laki dan Kartu Keluarga.',
-        'Surat Keterangan Waris (SKW) yang dilegalisir pejabat berwenang.',
-        'Bukti fisik surat di bawah tangan yang dibuat saudara kandung (bila ada salinannya).'
-      ],
-      risks: [
-        'Risiko pengalihan fisik lebih lanjut ke pihak ketiga beritikad baik sebelum dilakukan pemblokiran sertifikat di Kantor Pertanahan (BPN).',
-        'Potensi friksi keluarga dan perlawanan fisik di lokasi sawah saat panen.'
-      ],
-      risk_matrix: [
-        { clause: 'Pengalihan kepada pihak ketiga', level: 'HIGH', finding: 'Objek berisiko dialihkan sebelum pengamanan administratif atau yudisial dilakukan.', mitigation: 'Segera verifikasi status sertipikat dan tempuh langkah pengamanan yang sah sesuai hasil verifikasi.' },
-        { clause: 'Pembuktian kewenangan wali', level: 'MEDIUM', finding: 'Ahli waris masih di bawah umur sehingga tindakan hukum atas harta memerlukan pembuktian kapasitas wali.', mitigation: 'Lengkapi dokumen kewarisan dan penetapan/otorisasi perwalian yang relevan.' }
-      ],
-      overall_risk_score: 70,
-      best_case: 'Status hak dan kewarisan terverifikasi, pengalihan dapat dicegah, dan penguasaan objek dipulihkan melalui penyelesaian atau putusan yang efektif.',
-      worst_case: 'Objek terlanjur dialihkan kepada pihak ketiga dan sengketa berkembang menjadi pembuktian berlapis mengenai hak, itikad baik, serta kewenangan perwalian.',
-      verification_note: 'Verifikasi profesional masih PENDING. Hasil ini wajib diperiksa terhadap dokumen asli, status pertanahan aktual, tempus, dan hukum positif sebelum digunakan.',
-      recommendations: [
-        'Segera ajukan Permohonan Blokir Sertifikat ke Kantor Pertanahan (BPN) setempat untuk mencegah perubahan nama/beban hak tanggungan.',
-        'Ajukan permohonan penetapan wali anak di bawah umur ke Pengadilan Negeri setempat.',
-        'Kirimkan Surat Teguran/Somasi Resmi kepada saudara kandung dan pembeli di bawah tangan.',
-        'Siapkan gugatan Perbuatan Melawan Hukum (PMH) ke Pengadilan Negeri dengan permohonan Sita Jaminan (Conservatoir Beslag).'
-      ],
-      case_posture: 'PERDATA_WARIS_AGRARIA',
-      domain_classification: {
-        posture: 'PERDATA_WARIS_AGRARIA',
-        primary_domain: 'Hukum Perdata & Agraria',
-        domains: [
-          { id: 'civil_property', label: 'Hukum Kebendaan & Agraria', confidence: 0.95 },
-          { id: 'inheritance', label: 'Hukum Waris & Perwalian', confidence: 0.92 }
-        ]
-      },
-      analysis_provenance: {
-        mode: 'AI_ASSISTED_LEGAL_ENGINE',
-        provider: 'Google Gemini',
-        model: 'gemini-3.8-flash',
-        timestamp: new Date().toISOString()
-      },
-      case_readiness: {
-        metric: 'CASE_PREPARATION_COMPLETENESS',
-        label: 'Case Readiness / Kelengkapan Persiapan',
-        overall_score: 85,
-        confidence: 'HIGH',
-        dimensions: {
-          facts_completeness: { score: 90, label: 'Fakta & Subjek Terpetakan' },
-          evidence_robustness: { score: 80, label: 'Bukti Otentik (SHM & Akta Kematian/Lahir)' },
-          legal_basis_authority: { score: 90, label: 'Norma KUHPerdata & PP 24/1997 Sah' },
-          procedural_strategy: { score: 80, label: 'Strategi Blokir BPN & PMH Siap' }
-        }
-      },
-      case_working_paper: {
-        format_version: '1.0',
-        working_paper_percentage: {
-          metric: 'CASE_ANALYSIS_READINESS',
-          label: 'Case Readiness / Analysis Completeness',
-          percentage: 85,
-          confidence: 'HIGH',
-          variables_increasing: [
-            { variable: 'Kepemilikan SHM Terdaftar Otentik', impact: 25, basis: 'SHM atas nama pewaris memiliki kekuatan pembuktian sempurna' },
-            { variable: 'Kedudukan Ahli Waris Golongan I Mutlak', impact: 25, basis: 'Pasal 852 KUHPerdata anak kandung adalah ahli waris mutlak' },
-            { variable: 'Ketiadaan Izin Wali Pengadilan', impact: 20, basis: 'Transaksi di bawah tangan atas aset anak batal demi hukum' }
-          ],
-          variables_decreasing: [
-            { variable: 'Penguasaan Fisik 5 Tahun oleh Paman', impact: -10, basis: 'Perlu pengamanan fisik dan peringatan hukum tertulis' },
-            { variable: 'Belum Terbit Penetapan Wali Pengadilan', impact: -5, basis: 'Perlu penetapan wali untuk legal standing beracara di pengadilan' }
-          ]
-        }
-      },
-      document_reading: {
-        status: 'VERIFIED',
-        segments_read: 4,
-        segments_total: 4,
-        characters: 840
-      },
-      created_at: new Date().toISOString()
-    };
-    this.caseAnalyses.push(seedCase);
-  }
 
   // License
   getLicenseStatus() {
     return {
       allowed: true,
-      status: 'ACTIVE_STUDIO',
-      message: 'Lisensi LexiCore Enterprise Cloud Aktif (AI Studio Environment)',
-      installation_id: 'LEXICORE-PRO-AISTUDIO-BUILD',
+      status: 'ACTIVE_LOCAL',
+      message: 'Lisensi LexiCore aktif untuk Local Forensic Runtime',
+      installation_id: 'LEXICORE-LOCAL-RUNTIME',
       tier: 'ENTERPRISE_LIFETIME',
       features: [
         'full_case_analysis',
-        'ai_deep_synthesis',
+        'deterministic_forensic_reasoning',
         'regulatory_intelligence_48_statutes',
         'legal_drafting_43_templates',
         'contract_risk_review',
         'compliance_matrix',
         'client_communication'
       ],
-      expires_at: 'Lifetime Active Cloud Session'
+      expires_at: 'Managed by license policy'
     };
   }
 
@@ -497,6 +367,94 @@ class LexicoreDB {
     if (idx === -1) return false;
     this.caseAnalyses.splice(idx, 1);
     return true;
+  }
+
+  // ---------------------------------------------------------------------
+  // Cross-module binding (Living Lifecycle): menu 1 Client, 2 Draft,
+  // 3 Contract Review, 4 Case Analysis, 6 Compliance & Risk all reference
+  // the same `client_id` and, where the record originates from a case,
+  // the same `case_id`. These lookups let each panel pull the other
+  // panels' records instead of staying siloed history lists.
+  // ---------------------------------------------------------------------
+
+  getDraftsByCase(caseId: number): LegalDraft[] {
+    return this.drafts.filter(d => d.case_id === caseId).reverse();
+  }
+
+  getContractAnalysesByCase(caseId: number): ContractAnalysis[] {
+    return this.contractAnalyses.filter(c => c.case_id === caseId).reverse();
+  }
+
+  getComplianceAssessmentsByCase(caseId: number): ComplianceAssessment[] {
+    return this.complianceAssessments.filter(c => c.case_id === caseId).reverse();
+  }
+
+  getLegalResearchByCase(caseId: number): LegalResearchNote[] {
+    return this.legalResearch.filter(r => r.case_id === caseId).reverse();
+  }
+
+  getClientCommunicationsByCase(caseId: number): ClientCommunication[] {
+    return this.clientCommunications.filter(c => c.case_id === caseId).reverse();
+  }
+
+  // Everything on record for a single Case Analysis, across every other
+  // menu — this is what powers "client bisa memanggil dokumen kasus" and
+  // the Case panel's "Dokumen & Aktivitas Terkait" section.
+  getCaseRelatedRecords(caseId: number) {
+    const caseAnalysis = this.getCaseAnalysis(caseId) || null;
+    return {
+      case_analysis: caseAnalysis,
+      drafts: this.getDraftsByCase(caseId),
+      contract_reviews: this.getContractAnalysesByCase(caseId),
+      compliance_assessments: this.getComplianceAssessmentsByCase(caseId),
+      research_notes: this.getLegalResearchByCase(caseId),
+      client_communications: this.getClientCommunicationsByCase(caseId)
+    };
+  }
+
+  // Distinct clients seen anywhere in the system (client communications are
+  // the entry point for a client identity, menu 1), each with a rollup of
+  // how many records in every other module reference that client_id.
+  getClientDirectory(): Array<{ client_id: string; client_name: string; matter?: string; counts: Record<string, number>; last_activity: string }> {
+    const byId = new Map<string, { client_id: string; client_name: string; matter?: string; counts: Record<string, number>; last_activity: string }>();
+    const touch = (client_id?: string, client_name?: string, matter?: string, ts?: string, bucket?: keyof any) => {
+      const id = String(client_id || '').trim();
+      if (!id) return;
+      const cur = byId.get(id) || { client_id: id, client_name: client_name || id, matter, counts: {}, last_activity: ts || '' };
+      if (client_name && !cur.client_name) cur.client_name = client_name;
+      if (matter && !cur.matter) cur.matter = matter;
+      if (bucket) cur.counts[bucket as string] = (cur.counts[bucket as string] || 0) + 1;
+      if (ts && ts > cur.last_activity) cur.last_activity = ts;
+      byId.set(id, cur);
+    };
+    this.clientCommunications.forEach(c => touch(c.client_id, c.client_name, c.matter, c.created_at, 'client_documents'));
+    this.caseAnalyses.forEach(c => touch(c.client_id, c.client_name, c.title, c.created_at, 'case_analyses'));
+    this.drafts.forEach(d => touch(d.client_id, d.client_name, d.title, d.created_at, 'drafts'));
+    this.contractAnalyses.forEach(c => touch(c.client_id, c.client_name, c.filename, c.created_at, 'contract_reviews'));
+    this.complianceAssessments.forEach(c => touch(c.client_id, c.client_name, c.entity, c.created_at, 'risk_assessments'));
+    this.legalResearch.forEach(r => touch(r.client_id, r.client_name, r.title, r.created_at, 'research_notes'));
+    return [...byId.values()].sort((a, b) => (b.last_activity || '').localeCompare(a.last_activity || ''));
+  }
+
+  // Full cross-module timeline for one client: their own cases plus every
+  // draft/review/compliance/research record tagged with that client_id,
+  // OR tagged only with a case_id that belongs to one of that client's cases
+  // (covers records generated from a case before/without an explicit client
+  // tag of their own).
+  getClientTimeline(clientId: string) {
+    const id = String(clientId || '').trim();
+    const cases = this.caseAnalyses.filter(c => c.client_id === id);
+    const caseIds = new Set(cases.map(c => c.id));
+    const belongs = (x: { client_id?: string; case_id?: number }) => x.client_id === id || (x.case_id != null && caseIds.has(x.case_id));
+    return {
+      client_id: id,
+      cases,
+      drafts: this.drafts.filter(belongs).reverse(),
+      contract_reviews: this.contractAnalyses.filter(belongs).reverse(),
+      compliance_assessments: this.complianceAssessments.filter(belongs).reverse(),
+      research_notes: this.legalResearch.filter(belongs).reverse(),
+      client_communications: this.clientCommunications.filter(c => c.client_id === id || (c.case_id != null && caseIds.has(c.case_id))).reverse()
+    };
   }
 
   // Audit Logs

@@ -1,0 +1,71 @@
+{
+  "litigation-ambiguous-domain": {
+    "domain_primary": "Hukum Indonesia - Kualifikasi Belum Final",
+    "domain_confidence": "LOW",
+    "domain_ambiguous": true,
+    "source_role": "LITIGATION_SUBMISSION",
+    "document_reading_status": "READABLE",
+    "pipeline_gate_status": "DEGRADED",
+    "pipeline_gate_score": 88,
+    "pipeline_gate_blockers": [
+      "domain_routing_confident: confidence=LOW, ambiguous=true, margin=0",
+      "timeline: count=0"
+    ],
+    "case_readiness_score": 53,
+    "case_readiness_confidence": "LOW",
+    "working_paper_percentage": 53,
+    "issue_count": 3
+  },
+  "tanah-sertifikat-ganda": {
+    "domain_primary": "Hukum Agraria & Pertanahan",
+    "domain_confidence": "HIGH",
+    "domain_ambiguous": false,
+    "source_role": "LEGAL_CORRESPONDENCE",
+    "document_reading_status": "READABLE",
+    "pipeline_gate_status": "DEGRADED",
+    "pipeline_gate_score": 94,
+    "pipeline_gate_blockers": [
+      "timeline: count=0"
+    ],
+    "case_readiness_score": 73,
+    "case_readiness_confidence": "MEDIUM",
+    "working_paper_percentage": 73,
+    "issue_count": 7
+  },
+  "thin-early-stage-intake": {
+    "domain_primary": "Hukum Agraria & Pertanahan",
+    "domain_confidence": "MEDIUM",
+    "domain_ambiguous": false,
+    "source_role": "MIXED_CASE_MATERIAL",
+    "document_reading_status": "READABLE",
+    "pipeline_gate_status": "DEGRADED",
+    "pipeline_gate_score": 69,
+    "pipeline_gate_blockers": [
+      "actor_matrix: count=1",
+      "facts_distinct_from_claims: facts=0, claims=0, supporting=0, overlap=0, role=MIXED_CASE_MATERIAL",
+      "reasoning_core_ready: status=DEGRADED",
+      "source_role_classified: source_role=MIXED_CASE_MATERIAL",
+      "timeline: count=0"
+    ],
+    "case_readiness_score": 62,
+    "case_readiness_confidence": "MEDIUM",
+    "working_paper_percentage": 62,
+    "issue_count": 3
+  },
+  "document-manual-review-required": {
+    "domain_primary": "Hukum Agraria & Pertanahan",
+    "domain_confidence": "HIGH",
+    "domain_ambiguous": false,
+    "source_role": "LEGAL_CORRESPONDENCE",
+    "document_reading_status": "PARTIAL_REVIEW_REQUIRED",
+    "pipeline_gate_status": "DEGRADED",
+    "pipeline_gate_score": 94,
+    "pipeline_gate_blockers": [
+      "timeline: count=0"
+    ],
+    "case_readiness_score": 71,
+    "case_readiness_confidence": "MEDIUM",
+    "working_paper_percentage": 71,
+    "issue_count": 7
+  }
+}
