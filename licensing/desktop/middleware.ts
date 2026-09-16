@@ -52,7 +52,7 @@ export function desktopLicenseRoutes() {
     const key = (req.body?.key || '').toString();
     if (!key) return res.status(400).json({ error: 'MISSING_KEY' });
     const result = activateWithKey(key);
-    if (!result.ok) return res.status(400).json({ error: 'INVALID_KEY', reason: result.reason });
+    if (result.ok === false) return res.status(400).json({ error: 'INVALID_KEY', reason: result.reason });
     res.json({ ok: true, status: getLicenseStatus() });
   });
 

@@ -76,7 +76,7 @@ export function getLicenseStatus(): LicenseStatus {
 
   const rawKey = fs.readFileSync(file, 'utf8');
   const result = verifyActivationKey(rawKey);
-  if (!result.ok) {
+  if (result.ok === false) {
     return { state: 'invalid', reason: result.reason, deviceId };
   }
 

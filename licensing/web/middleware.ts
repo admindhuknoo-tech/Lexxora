@@ -61,7 +61,7 @@ export function webLicenseRoutes() {
   router.post('/start-trial', (req: Request, res: Response) => {
     if (!req.customerId) return res.status(401).json({ error: 'NOT_AUTHENTICATED' });
     const result = startDemoTrial(req.customerId);
-    if (!result.ok) return res.status(400).json({ error: 'TRIAL_UNAVAILABLE', reason: result.reason });
+    if (result.ok === false) return res.status(400).json({ error: 'TRIAL_UNAVAILABLE', reason: result.reason });
     res.json({ ok: true, subscription: result.subscription });
   });
 
