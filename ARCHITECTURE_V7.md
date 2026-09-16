@@ -62,35 +62,49 @@ utuh, dan diff licensing mudah di-review terpisah dari logika bisnis LexiCore.
    pengguna install LexiCore Desktop
         │
         ▼
-[App generate Device ID]  ← licensing/desktop/fingerprint.ts
-   ditampilkan di layar aktivasi, contoh: LXC7-8F2A-91BD-4C0E-77A1
+[App generate Installation ID]  ← licensing/desktop/fingerprint.ts
+   ditampilkan di modal aktivasi (sudah ada di index.html), contoh:
+   LXC7-8F2A-91BD-4C0E-77A1
         │  (dikirim manual: WA / email / dsb — TIDAK ada koneksi server)
         ▼
 [Admin]
    npx tsx licensing/admin-tools/activate.ts commercial LXC7-... "Nama Pelanggan"
-        │  → menghasilkan activation key (ditandatangani Ed25519)
-        │  (dikirim balik manual ke pengguna)
+        │  → menulis file licensing/admin-tools/issued-licenses/<id>.lic.json
+        │    (JSON berisi {payload, signature}, ditandatangani Ed25519)
+        │  (file ini dikirim balik manual ke pengguna sebagai lampiran)
         ▼
-[Pengguna paste key di app]
-   POST /api/license/activate { key }
-        │  licensing/desktop/license.ts:
+[Pengguna upload file .lic.json di modal aktivasi]
+   POST /api/license/install { license: <isi file> }
+        │  licensing/desktop/license.ts → verifyLicenseEnvelope():
         │    1. verifikasi tanda tangan pakai public key
-        │    2. cek deviceId di payload == Device ID mesin ini
+        │    2. cek deviceId di payload == Installation ID mesin ini
         │    3. cek expiresAt (null = permanen / commercial; ada nilai = demo)
-        │    4. simpan ke ~/.lexicore/license.key (Linux/Mac) atau
-        │       %APPDATA%\LexiCore\license.key (Windows)
+        │    4. simpan ke ~/.lexicore/license.json (Linux/Mac) atau
+        │       %APPDATA%\LexiCore\license.json (Windows)
         ▼
 [App unlocked — 100% offline setelahnya]
 ```
 
-**Integrasi ke `server.ts` (branch `track/desktop`):**
+**Integrasi di `server.ts` (branch `track/desktop`, sudah diterapkan):**
 
 ```ts
-import { requireDesktopLicense, desktopLicenseRoutes } from './licensing/desktop/middleware';
+import { getLicenseStatus, installLicense, removeLicense } from './licensing/desktop/license';
+import { requireDesktopLicense } from './licensing/desktop/middleware';
 
-app.use('/api/license', desktopLicenseRoutes());   // status, device-id, activate
-app.use('/api', requireDesktopLicense());          // gate semua endpoint lain
+app.get('/api/license/status', ...);   // pakai getLicenseStatus()
+app.post('/api/license/install', ...); // pakai installLicense(req.body.license)
+app.post('/api/license/remove', ...);  // pakai removeLicense()
+app.use('/api', requireDesktopLicense());  // gate semua endpoint lain
 ```
+
+Bentuk respons `/api/license/status` sengaja mengikuti kontrak yang **sudah
+lebih dulu ada** di `public/lexicore.v6122.js` (`renderLicenseState()`, badge
+`licenseStatusBadge`, modal upload file) — jadi tidak perlu membangun UI
+aktivasi dari nol, tinggal sambungkan backend nyata ke kontrak field yang
+sudah dipakai frontend (`allowed`, `status`, `message`, `installation_id`,
+`expires_at`). Catatan: di branch `track/web`, badge dan modal yang sama ini
+diganti total menjadi UI langganan (lihat §4) — kedua branch menyimpang di
+titik ini secara sengaja.
 
 **Setup satu kali (admin, offline):**
 
@@ -144,18 +158,34 @@ lewat Electron/Tauri maupun `node dist/server.cjs` langsung).
    perpanjangan, menampilkan daftar paket dari GET /api/license/plans
 ```
 
-**Integrasi ke `server.ts` (branch `track/web`):**
+**Integrasi di `server.ts` (branch `track/web`, sudah diterapkan):**
 
 ```ts
 import { requireActiveSubscription, webLicenseRoutes } from './licensing/web/middleware';
 import { webAdminLicenseRoutes } from './licensing/web/adminApi';
 
-app.use('/api/license', webLicenseRoutes());          // status, plans, start-trial
+app.use('/api/license', webLicenseRoutes());          // status, plans, start-trial, dev-mock-pay
 app.use('/api/admin/license', webAdminLicenseRoutes()); // grant/revoke manual (admin)
 app.use('/api', requireActiveSubscription());          // gate semua endpoint lain
 ```
 
 Set `LEXICORE_ADMIN_SECRET` di `.env` sebelum memakai admin API.
+
+**`req.customerId` saat ini** diisi oleh middleware cookie sementara di
+`server.ts` (cari komentar "PLACEHOLDER until a real login system exists") —
+server memberi setiap pengunjung id acak lewat cookie `lc_cid` (400 hari,
+httpOnly) supaya seluruh alur trial/subscription/admin bisa diuji dan
+dipakai sekarang juga, walau belum ada sistem akun sungguhan. Saat sistem
+login dibangun, cukup ganti middleware ini agar `req.customerId` diisi dari
+session/JWT — tidak ada kode licensing lain yang perlu berubah.
+
+**UI langganan di frontend:** modal aktivasi desktop (`licenseModal`) di
+`index.html` diganti total menjadi `subscriptionModal` — badge status
+(`subscriptionStatusBadge`), daftar paket yang diambil live dari
+`GET /api/license/plans` (harga Rupiah tampil apa adanya dari
+`licensing/web/plans.ts`, tidak di-hardcode di frontend), tombol "Mulai
+Trial Gratis", dan tombol bayar per paket yang saat ini memanggil
+`POST /api/license/dev-mock-pay` (lihat catatan payment gateway di bawah).
 
 **Demo Commercial (Web)** = trial otomatis, sekali per akun:
 
@@ -166,11 +196,15 @@ POST /api/license/start-trial   (tanpa perlu admin — self-serve)
 `licensing/web/plans.ts` → `DEMO_DURATION_MS` (default 3 hari) mengatur
 lama trial.
 
-**Open item — autentikasi pengguna web:** repo saat ini belum punya sistem
-akun/login. `requireActiveSubscription()` mengasumsikan sesuatu di upstream
-sudah mengisi `req.customerId` (misalnya dari session/JWT setelah login).
-Ini perlu dibangun di branch `track/web` sebelum subscription bisa dipakai
-sungguhan — licensing-nya sendiri sudah siap begitu `customerId` tersedia.
+**Open item — autentikasi pengguna web sungguhan:** repo saat ini belum
+punya sistem akun/login nyata (nama, email, password). Yang sudah berjalan
+adalah id anonim per-browser lewat cookie (lihat di atas) — cukup untuk
+mengetes dan bahkan menjalankan alur trial/subscription apa adanya, tapi
+belum mengikat langganan ke identitas pengguna sungguhan (ganti browser/
+hapus cookie = langganan "hilang" dari sudut pandang pengguna, walau tetap
+tercatat di `subscriptionStore` by customerId lama). Perlu dibangun sebelum
+rilis produksi: sistem akun (email/password atau OAuth) yang mengisi
+`req.customerId` dari session/JWT, bukan cookie acak.
 
 **Open item — payment gateway:** `POST /api/license/dev-mock-pay` disediakan
 supaya alur bisa diuji end-to-end sekarang juga (nonaktif otomatis kalau
@@ -206,16 +240,16 @@ file itu, jadi migrasinya terisolasi di satu file.
 ## 7. Checklist sebelum rilis masing-masing track
 
 **Desktop (`track/desktop`):**
-- [ ] Jalankan `generate-keypair.ts`, isi `publicKey.ts`, amankan private key
-- [ ] Mount `requireDesktopLicense()` + `desktopLicenseRoutes()` di `server.ts`
-- [ ] Bangun layar aktivasi di frontend (tampilkan Device ID, form paste key)
+- [x] Jalankan `generate-keypair.ts`, isi `publicKey.ts`, amankan private key *(alur diuji end-to-end dengan keypair sungguhan; placeholder dikembalikan di repo — admin generate keypair sendiri saat rilis nyata)*
+- [x] Mount `requireDesktopLicense()` di `server.ts`, sambungkan ke `/api/license/status`, `/install`, `/remove`
+- [x] Layar aktivasi di frontend (badge + modal upload file lisensi) — ternyata sudah ada dari awal di `index.html`/`public/lexicore.v6122.js`, tinggal disambungkan ke backend nyata
 - [ ] Bungkus dengan Electron/Tauri → installer .exe/.dmg/.AppImage
-- [ ] Uji: device baru → unactivated → paste key salah → paste key device lain → paste key benar → expired (demo)
+- [x] Uji: device baru → unactivated (402 di semua endpoint) → generate lisensi via CLI → upload → aktif (200) → lisensi ditempel/diubah device lain → ditolak
 
 **Web (`track/web`):**
-- [ ] Bangun sistem akun/login (isi `req.customerId`)
-- [ ] Pilih & integrasikan payment gateway (ganti `dev-mock-pay`)
-- [ ] Ganti `subscriptionStore.ts` ke database sungguhan
-- [ ] Mount `requireActiveSubscription()` + routes di `server.ts`
-- [ ] Bangun halaman pilih paket (pakai `GET /api/license/plans`) & halaman "masa aktif habis"
-- [ ] Uji: akun baru → start-trial → trial habis → beli paket → expired → renew
+- [ ] Bangun sistem akun/login sungguhan (saat ini `req.customerId` memakai cookie anonim `lc_cid` sebagai placeholder — lihat `server.ts`, cari "PLACEHOLDER until a real login system exists")
+- [ ] Pilih & integrasikan payment gateway (ganti `dev-mock-pay`, yang otomatis nonaktif saat `NODE_ENV=production`)
+- [ ] Ganti `subscriptionStore.ts` ke database sungguhan (saat ini file JSON `data/subscriptions.json`)
+- [x] Mount `requireActiveSubscription()` + `webLicenseRoutes()` + `webAdminLicenseRoutes()` di `server.ts`
+- [x] Bangun modal langganan di frontend (badge status, daftar paket IDR live dari API, tombol trial & bayar)
+- [x] Uji: akun baru (cookie baru) → 402 di semua endpoint → mulai trial → 200 → trial kedua ditolak → beli paket MONTH → masa aktif diperpanjang dari sisa trial (bukan dari nol) → admin endpoint ditolak tanpa `x-admin-secret`, diterima dengan secret yang benar
