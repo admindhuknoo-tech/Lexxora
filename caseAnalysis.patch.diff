@@ -1,0 +1,67 @@
+--- a/server/caseAnalysis.ts
++++ b/server/caseAnalysis.ts
+@@ -1192,6 +1192,10 @@
+   // being surfaced). Carried through so the independent issue-binding gate below
+   // treats it as corroborating evidence instead of silently discarding it.
+   upstream_nexus_score?: number;
++  // Retrieval/catalog metadata kept for diagnostics only. These terms MUST NOT
++  // satisfy issue-binding gates because they are not document substance.
++  metadata_keywords?: string[];
++  evidence_origin?: 'DOCUMENT_CONTENT' | 'CATALOG_METADATA';
+   // LOCAL-only: the regulation's raw article list, carried through so binding
+   // can re-rank articles per issue (see V7.0.2.9 article_summary precision fix
+   // below) instead of reusing one case-wide article ranking for every issue.
+@@ -1483,9 +1487,21 @@
+       // GATE 3A — independent issue support.
+       // Candidate-level explicit citation is NOT a blanket issue override:
+       // every bound issue still needs at least one issue-specific semantic match.
++      // IMPORTANT: retrieval/catalog keywords are intentionally excluded from
++      // titleHay/tagsHay/artHay. They are diagnostics only, never evidence.
+       if (!specificDistinct.length) {
++        const metadataHay=normalizeSearchToken((c.metadata_keywords||[]).join(' '));
++        const metadataOnlyHit=terms.some(t=>{
++          const n=normalizeSearchToken(t).trim();
++          return n.length>=4 && isIssueSpecificTerm(n) && containsNormalizedTerm(metadataHay,n);
++        });
+         const rej=((c as any).__support_rejections ||= []);
+-        if (rej.length<24) rej.push({ issue:meta.id, reason:'tidak ada kecocokan spesifik dengan isu' });
++        if (rej.length<24) rej.push({
++          issue:meta.id,
++          reason:metadataOnlyHit
++            ? 'hanya cocok pada metadata katalog/retrieval; tidak ada dukungan substansi authority'
++            : 'tidak ada kecocokan spesifik dengan isu',
++        });
+         continue;
+       }
+ 
+@@ -1946,8 +1962,13 @@
+       // title, excerpt, domain_tags, and judicial/instrument metadata — never the
+       // query, and never a score that was itself computed partly from query text.
+       const officialContext=`${c.instrument_type||''} ${c.court||''}`;
+-      const keywordText=(Array.isArray(c.keywords)?c.keywords:[]).join(' ');
+-      const hay=normalizeSearchToken(`${c.title||''} ${c.excerpt||''} ${officialContext} ${keywordText} ${(c.domain_tags||[]).join(' ')}`);
++      const documentTags=Array.isArray(c.domain_tags)?c.domain_tags:[];
++      const metadataKeywords=Array.isArray(c.keywords)?c.keywords:[];
++      // Precision boundary: only authority-owned/document-derived text may affect
++      // domain alignment and issue binding. Catalog keywords remain available
++      // for diagnostics but cannot promote an authority by themselves.
++      const documentEvidence=`${c.title||''} ${c.excerpt||''} ${officialContext} ${documentTags.join(' ')} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`;
++      const hay=normalizeSearchToken(documentEvidence);
+       let primary=0, secondary=0, foreign=0;
+       for (const a of domainRankingContext.primary_anchors) {
+         if (a.length>=4 && hay.includes(a)) primary++;
+@@ -1969,8 +1990,12 @@
+         source_kind:'OFFICIAL' as const,
+         source_label:safeString(c.title),
+         article_summary:'',
+-        domain_tags:Array.isArray(c.domain_tags)?c.domain_tags:(Array.isArray(c.keywords)?c.keywords:[]),
+-        article_text_pool:safeString(`${c.discovery_context||''} ${c.excerpt||''} ${officialContext} ${keywordText} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`),
++        domain_tags:documentTags,
++        // Deliberately exclude c.query, discovery_context, material_nexus_score,
++        // and catalog keywords. This pool is evidence, not retrieval provenance.
++        article_text_pool:safeString(`${c.excerpt||''} ${officialContext} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`),
++        metadata_keywords:metadataKeywords,
++        evidence_origin:c.verification_state==='INDEXED_OFFICIAL'?'CATALOG_METADATA':'DOCUMENT_CONTENT',
+         material_confidence:(c.material_nexus_status==='VERIFIED'?'HIGH':'MEDIUM') as 'HIGH'|'MEDIUM',
+         citation_hit:['EXACT_CITATION','USER_EXACT_CITATION'].includes(safeString(c.query_kind)),
+         regime_note:null,

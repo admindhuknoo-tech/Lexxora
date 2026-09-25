@@ -1,0 +1,114 @@
+--- server/legalOntology.ts
++++ server/legalOntology.ts
+@@ -26,6 +26,13 @@
+   negative_signals?: Array<{ pattern: RegExp; weight: number }>;
+   issue_templates: LegalIssueTemplate[];
+   authority_anchors: string[];
++  // Named foundational codified instrument(s) for this domain (e.g. KUHPerdata
++  // for PERDATA_KONTRAKTUAL). These are titles, never regulation numbers, and
++  // are used to issue one dedicated, guaranteed-budget discovery query per
++  // domain so the controlling code itself is searched for by name instead of
++  // relying solely on topical-nexus scoring against modern regulation titles
++  // that rarely repeat courtroom-language terms like "wanprestasi" verbatim.
++  core_instruments?: string[];
+ }
+ 
+ const profile = (
+@@ -35,11 +42,12 @@
+   issue_templates: LegalIssueTemplate[],
+   authority_anchors: string[],
+   negative_signals: Array<[RegExp, number]> = [],
++  core_instruments: string[] = [],
+ ): LegalDomainProfile => ({
+   id, label,
+   weighted_signals: weighted_signals.map(([pattern, weight]) => ({ pattern, weight })),
+   negative_signals: negative_signals.map(([pattern, weight]) => ({ pattern, weight })),
+-  issue_templates, authority_anchors,
++  issue_templates, authority_anchors, core_instruments,
+ });
+ 
+ export const LEGAL_DOMAIN_PROFILES: LegalDomainProfile[] = [
+@@ -52,7 +60,8 @@
+       { id:'civil-criminal-response', question:'Apakah tindakan penguasaan atau perusakan menimbulkan konsekuensi perdata, pidana, atau keduanya, dan unsur/bukti apa yang diperlukan untuk tiap jalur?', basis:'Terdapat tindakan terhadap barang/dokumen atau penguasaan yang berpotensi melanggar hak pihak lain.', signals:[/merusak|dirobek|menghancurkan|menghilangkan|menguasai|melawan\s+hukum|pidana|lapor/i], query_terms:['perbuatan melawan hukum','perusakan barang','penguasaan tanpa hak'] },
+     ],
+     ['waris','ahli waris','pewaris','legitime portie','bagian mutlak','harta bawaan','harta bersama','boedel','pewarisan'],
+-    [[/wakaf|hak\s+ulayat|ptsl/i,4]]),
++    [[/wakaf|hak\s+ulayat|ptsl/i,4]],
++    ['Kitab Undang-Undang Hukum Perdata']),
+   profile('AGRARIA_PERTANAHAN','Hukum Agraria & Pertanahan',
+     [[/\btanah\b|pertanahan|agraria|bpn/i,3],[/sertifikat|\bshm\b|\bshgb\b|\bhgb\b/i,4],[/\bajb\b|\bppjb\b|hak\s+atas\s+tanah|pendaftaran\s+tanah/i,7],[/sengketa\s+batas|tumpang\s+tindih|pengukuran|surat\s+ukur/i,8]],
+     [
+@@ -61,7 +70,8 @@
+       { id:'land-registration', question:'Apakah pendaftaran, pemeliharaan data, peralihan, atau pembebanan hak telah dilakukan sesuai dasar dan kewenangan yang benar?', basis:'Terdapat tindakan administrasi/pendaftaran hak atas tanah.', signals:[/pendaftaran|peralihan|balik\s+nama|sertifikat|bpn|hak\s+tanggungan/i], query_terms:['pendaftaran tanah','peralihan hak','sertifikat','hak atas tanah','pemeliharaan data','balik nama'] },
+     ],
+     ['agraria','pertanahan','hak atas tanah','pendaftaran tanah','sertifikat','bpn'],
+-    [[/legitime\s+portie|bagian\s+mutlak|ahli\s+waris/i,3]]),
++    [[/legitime\s+portie|bagian\s+mutlak|ahli\s+waris/i,3]],
++    ['Undang-Undang Pokok Agraria']),
+   profile('PERDATA_KONTRAKTUAL','Hukum Perdata & Perikatan',
+     [[/wanprestasi|ingkar\s+janji/i,9],[/perjanjian|kontrak|perikatan|pengikatan\s+jual\s+beli|sewa|menyewa|penyewa|pemberi\s+sewa/i,6],[/somasi|jatuh\s+tempo|prestasi|ganti\s+rugi/i,6],[/jual\s+beli|utang|piutang|debitur|kreditur|gadai|menggadaikan|digadaikan/i,5],[/pembayaran\s+bertahap|uang\s+muka|\bdp\b|termin|tahap\s+(?:kedua|berikut)/i,7],[/pembatalan|pengakhiran|pengembalian\s+uang|kembali\s+uang|refund|restitusi/i,8],[/tidak\s+kunjung|menghindar|tidak\s+memenuhi/i,5],[/perbuatan\s+melawan\s+hukum|\bpmh\b/i,7]],
+     [
+@@ -72,22 +82,30 @@
+       { id:'competing-disposition', question:'Apakah objek atau hak yang sebelumnya dijanjikan/ditransaksikan kemudian dialihkan atau ditawarkan kepada pihak ketiga, dan apa akibatnya terhadap kewajiban serta perlindungan pihak yang lebih dahulu bertransaksi?', basis:'Terdapat indikasi pengalihan, penjualan ulang, atau transaksi dengan pihak ketiga atas objek yang sama.', signals:[/pihak\s+ketiga|menjual\s+kembali|dijual\s+kembali|akan\s+dijual|mengalihkan|dialihkan|objek\s+yang\s+sama/i], query_terms:['pengalihan kepada pihak ketiga','jual beli objek yang sama','perlindungan pihak bertransaksi'] },
+       { id:'tort-alternative', question:'Apakah terdapat dasar perbuatan melawan hukum yang berdiri sendiri atau hanya duplikasi dari wanprestasi?', basis:'Terdapat tindakan di luar pelaksanaan kontrak yang berpotensi melanggar hak.', signals:[/perbuatan\s+melawan\s+hukum|\bpmh\b|melawan\s+hukum/i], query_terms:['perbuatan melawan hukum','ganti rugi'] },
+     ],
+-    ['wanprestasi','perjanjian','perikatan','hukum perdata','kuhperdata','ganti rugi','ingkar janji','somasi']),
++    ['wanprestasi','perjanjian','perikatan','hukum perdata','kuhperdata','ganti rugi','ingkar janji','somasi'],
++    [],
++    ['Kitab Undang-Undang Hukum Perdata']),
+   profile('PIDANA_MATERIIL_FORMIL','Hukum Pidana & Acara Pidana',
+     [[/pidana|tersangka|terdakwa|penyidik|penuntut|kejaksaan|laporan\s+polisi|polres/i,4],[/penangkapan|penahanan|ditangkap|ditahan|penggeledahan|penyitaan/i,7],[/penipuan|penggelapan|korupsi|suap|gratifikasi|menggadaikan\s+barang\s+milik|digadaikan\s+tanpa\s+izin/i,7]],
+     [
+       { id:'criminal-elements', question:'Unsur delik apa yang didalilkan dan fakta/bukti apa yang mendukung atau meniadakan tiap unsur?', basis:'Terdapat dugaan tindak pidana.', signals:[/pidana|penipuan|penggelapan|korupsi|suap|gratifikasi|menggadaikan\s+barang\s+milik|digadaikan\s+tanpa\s+izin/i], query_terms:['unsur tindak pidana','pembuktian pidana'] },
+       { id:'criminal-procedure', question:'Apakah proses penyidikan, perolehan bukti, dan upaya paksa memenuhi dasar, prosedur, tempus, dan kewenangan?', basis:'Terdapat tindakan proses pidana atau upaya paksa.', signals:[/bap|penyidik|penangkapan|penahanan|ditangkap|ditahan|laporan\s+polisi|polres|penggeledahan|penyitaan/i], query_terms:['acara pidana','penyidikan','upaya paksa','alat bukti'] },
+     ],
+-    ['pidana','kuhp','kuhap','acara pidana','tersangka','terdakwa','alat bukti']),
++    ['pidana','kuhp','kuhap','acara pidana','tersangka','terdakwa','alat bukti'],
++    [],
++    ['Kitab Undang-Undang Hukum Pidana','Kitab Undang-Undang Hukum Acara Pidana']),
+   profile('KETENAGAKERJAAN_PHI','Hukum Ketenagakerjaan & Hubungan Industrial',
+     [[/phk|hubungan\s+kerja|ketenagakerjaan/i,8],[/upah|pesangon|pekerja|buruh|pengusaha/i,4]],
+     [{ id:'employment-rights', question:'Apa status hubungan kerja, hak normatif, dasar perselisihan/PHK, serta prosedur penyelesaian yang berlaku?', basis:'Terdapat hubungan kerja atau perselisihan industrial.', signals:[/phk|hubungan\s+kerja|upah|pekerja|buruh|pesangon|pengusaha/i], query_terms:['hubungan industrial','PHK','upah','pesangon'] }],
+-    ['ketenagakerjaan','hubungan industrial','pekerja','buruh','phk','upah','pesangon']),
++    ['ketenagakerjaan','hubungan industrial','pekerja','buruh','phk','upah','pesangon'],
++    [],
++    ['Undang-Undang Ketenagakerjaan']),
+   profile('KORPORASI_BISNIS','Hukum Perusahaan & Bisnis',
+     [[/perseroan|direksi|komisaris|rups|pemegang\s+saham/i,7],[/saham|korporasi|perusahaan/i,3]],
+     [{ id:'corporate-authority', question:'Apa kewenangan organ, hubungan antar-pemegang kepentingan, dan akibat tindakan korporasi yang dipersoalkan?', basis:'Terdapat struktur atau tindakan korporasi.', signals:[/perseroan|direksi|komisaris|rups|saham|pemegang\s+saham/i], query_terms:['perseroan','direksi','komisaris','RUPS','pemegang saham'] }],
+-    ['perseroan','direksi','komisaris','rups','pemegang saham','saham']),
++    ['perseroan','direksi','komisaris','rups','pemegang saham','saham'],
++    [],
++    ['Undang-Undang Perseroan Terbatas']),
+   profile('PEMILU_ETIK_DKPP','Hukum Pemilu & Etik Penyelenggara',
+     [[/dkpp|kode\s+etik|penyelenggara\s+pemilu/i,9],[/anggota\s+kpu|kpu\s+kota|bawaslu|teradu|pengadu/i,4]],
+     [
+@@ -98,7 +116,9 @@
+   profile('TUN_ADMINISTRASI','Hukum Administrasi Negara / TUN',
+     [[/ptun|keputusan\s+tata\s+usaha|administrasi\s+negara/i,8],[/pejabat\s+tata\s+usaha|izin|keputusan\s+pejabat/i,4]],
+     [{ id:'administrative-decision', question:'Apakah keputusan/tindakan pejabat memenuhi kewenangan, prosedur, substansi, tempus, dan upaya administratif yang berlaku?', basis:'Terdapat keputusan atau tindakan administrasi pemerintahan.', signals:[/ptun|keputusan\s+tata\s+usaha|administrasi\s+negara|izin/i], query_terms:['keputusan tata usaha negara','kewenangan','upaya administratif'] }],
+-    ['tata usaha negara','ptun','administrasi negara','keputusan tata usaha','izin']),
++    ['tata usaha negara','ptun','administrasi negara','keputusan tata usaha','izin'],
++    [],
++    ['Undang-Undang Peradilan Tata Usaha Negara','Undang-Undang Administrasi Pemerintahan']),
+ ];
+ 
+ /**
+@@ -443,4 +463,16 @@
+   const context=inferLegalContext(`${domainOrQuery} ${text}`);
+   const active=[context.primary,...context.secondary].filter(x=>x.profile);
+   return [...new Set(active.flatMap(x=>x.profile!.authority_anchors))].slice(0,24);
++}
++
++// Named foundational codified instrument(s) (e.g. "Kitab Undang-Undang Hukum
++// Perdata") for the case's classified domain(s). Unlike topical/anchor terms,
++// these are meant to be issued as their own standalone, undiluted discovery
++// query — mixing them into a longer ontology query buries the exact title
++// under courtroom-language terms and loses the identity-style match a named
++// code is otherwise well-placed to win.
++export function coreInstrumentQueriesForContext(text: string): string[] {
++  const context = inferLegalContext(text);
++  const active = [context.primary, ...context.secondary].filter(x => x.profile);
++  return [...new Set(active.flatMap(x => x.profile!.core_instruments || []))].slice(0, 4);
+ }
+\ No newline at end of file

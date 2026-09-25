@@ -22,8 +22,8 @@ const guarded = applyOcrSourceQualityGuard(raw, [
 ]);
 
 check('1. low OCR page makes source review-required', guarded.status==='REVIEW_REQUIRED', `status=${guarded.status}`);
-check('2. page below threshold is excluded', guarded.excluded_pages.length===1 && guarded.excluded_pages[0]===2, `excluded=${guarded.excluded_pages.join(',')}`);
-check('3. good pages remain usable', guarded.usable_pages===2, `usable=${guarded.usable_pages}`);
+check('2. low confidence alone does not exclude present content', guarded.excluded_pages.length===0 && guarded.low_confidence_pages.includes(2), `excluded=${guarded.excluded_pages.join(',')}; low=${guarded.low_confidence_pages.join(',')}`);
+check('3. content-present pages remain coverage despite low confidence', guarded.usable_pages===3, `usable=${guarded.usable_pages}`);
 check('4. excluded OCR text is absent from analysis text', !/Jaksa Madya|CamScanner/.test(guarded.text));
 const em=buildEvidenceModel(guarded.text);
 check('5. low-quality page cannot create actor', !em.actors.some(a=>/Jaksa Madya/i.test(a.actor)), `actors=${em.actors.map(a=>a.actor).join(',')}`);

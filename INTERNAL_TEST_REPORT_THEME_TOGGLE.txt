@@ -1,0 +1,32 @@
+LexiCore V7.0.1 — Internal Test Report: Theme Toggle Corrective
+Date: 2026-09-18
+
+Change requested:
+- Remove System/Light/Dark dropdown.
+- Replace with one Light/Dark toggle matching the LexiCore design system.
+- On first use (no saved preference), follow the operating-system color preference.
+- After user toggles, persist explicit Light or Dark choice in localStorage.
+
+Static/integration checks:
+- themeModeSelect removed from HTML/JS/CSS: PASS
+- themeToggle unique ID: PASS
+- themeToggleText unique ID: PASS
+- button type=button: PASS
+- aria-pressed state present: PASS
+- focus-visible styling present: PASS
+- CSS parsing: PASS (0 parser errors)
+- existing responsive theme tokens retained: PASS
+
+Runtime logic unit checks (actual theme IIFE executed with mocked DOM/localStorage/matchMedia):
+- OS Light + no preference -> Light: PASS
+- OS Dark + no preference -> Dark: PASS
+- Light -> toggle -> Dark + persisted: PASS
+- Dark -> toggle -> Light + persisted: PASS
+- saved Dark preference restored: PASS
+- legacy stored value "system" does not break initialization: PASS
+- aria-pressed and label state synchronize with theme: PASS
+
+Browser-render note:
+- Browser automation was attempted in this environment, but navigation is blocked by the environment administrator policy (ERR_BLOCKED_BY_ADMINISTRATOR).
+- This package is therefore not falsely marked as browser-E2E tested for this corrective turn.
+- The prior Theme Tested package had browser-render coverage before this UI-control-only replacement; this corrective changes only the theme control markup/CSS and theme-toggle handler.

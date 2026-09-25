@@ -31,7 +31,7 @@ check('banking expert inferred',wf.witness_strategy.expert_domains.some(x=>/Perb
 check('criminal expert inferred',wf.witness_strategy.expert_domains.some(x=>/pidana/i.test(x)),wf.witness_strategy.expert_domains.join('|'));
 check('draft chronology planned',wf.drafting_plan.some(x=>/kronologi/i.test(x.document)));
 check('draft evidence map planned',wf.drafting_plan.some(x=>/pembuktian|allegation/i.test(x.document)));
-check('draft defense memo planned',wf.drafting_plan.some(x=>/defense|pembelaan/i.test(x.document)));
+check('stage-appropriate criminal drafting planned',wf.drafting_plan.some(x=>/pendampingan pemeriksaan|pembelaan|defense/i.test(x.document))); 
 check('witness questions planned',wf.drafting_plan.some(x=>/saksi/i.test(x.document)));
 check('citation verification next action',wf.next_actions.some(x=>/citation|status berlaku|tempus/i.test(x)));
 check('no named-case hardcode in workflow output',!/Elya|Dewi Mufarida|Blitar/i.test(JSON.stringify(wf)));

@@ -16,7 +16,7 @@ import { shortId } from '../core/crypto';
 import { PLANS, DEMO_DURATION_MS } from './plans';
 import type { WebSubscription, SubscriptionPlan } from '../core/types';
 
-const STORE_PATH = path.join(process.cwd(), 'data', 'subscriptions.json');
+const STORE_PATH = path.join(process.env.LEXICORE_WEB_DATA_DIR || path.join(process.cwd(), 'data'), 'subscriptions.json');
 
 function load(): WebSubscription[] {
   try {
@@ -29,7 +29,9 @@ function load(): WebSubscription[] {
 
 function save(all: WebSubscription[]): void {
   fs.mkdirSync(path.dirname(STORE_PATH), { recursive: true });
-  fs.writeFileSync(STORE_PATH, JSON.stringify(all, null, 2), 'utf8');
+  const tmp = `${STORE_PATH}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(all, null, 2), 'utf8');
+  fs.renameSync(tmp, STORE_PATH);
 }
 
 /** The subscription currently governing access for this customer, if any. */

@@ -1,5 +1,9 @@
 import { inflateRawSync, inflateSync } from 'node:zlib';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ocrImageLocal, ocrPdfLocal } from './localOcr';
+import { assessOcrExtractedPage, assessOcrPageCoverage, splitMarkedPages } from './caseIntegrityPolicy.mjs';
 
 export interface DocumentIngestionResult {
   text: string;
@@ -20,6 +24,10 @@ export interface DocumentIngestionResult {
     excluded_pages: number[];
     excluded_spans?: number;
     repaired_spans?: number;
+    page_coverage?: number;
+    minimum_page_coverage?: number;
+    missing_pages?: number;
+    weak_content_pages?: number[];
   };
 }
 
@@ -137,7 +145,7 @@ function extractTextFromPdfStream(stream: Buffer): string {
   return out.join('\n');
 }
 
-function extractPdfText(buffer: Buffer): { text: string; pages: number } {
+function extractPdfTextLegacy(buffer: Buffer): { text: string; pages: number } {
   const latin = buffer.toString('latin1');
   const pages = Math.max(1, (latin.match(/\/Type\s*\/Page\b/g) || []).length);
   const chunks: string[] = [];
@@ -157,12 +165,98 @@ function extractPdfText(buffer: Buffer): { text: string; pages: number } {
   return { text: normalizeLegalText(chunks.join('\n')), pages };
 }
 
+
+async function withIngestionTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} melewati batas waktu ${Math.ceil(ms / 1000)} detik`)), ms);
+        (timer as any).unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function textLayerPageLooksUsable(text: string): boolean {
+  const src = normalizeLegalText(text);
+  if (src.length < 30) return false;
+  const letters = (src.match(/\p{L}/gu) || []).length;
+  const words = src.match(/\p{L}{2,}/gu) || [];
+  return words.length >= 5 && letters / Math.max(1, src.length) >= 0.35;
+}
+
+async function extractPdfTextLayer(buffer: Buffer): Promise<{ text:string; pages:number; pages_with_text:number; coverage_ratio:number; empty_pages:number[] }> {
+  const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const requireFromProject = createRequire(path.join(process.cwd(), 'package.json'));
+  const pdfjsRoot = path.dirname(requireFromProject.resolve('pdfjs-dist/package.json'));
+  const dirUrl = (dir: string) => pathToFileURL(path.join(pdfjsRoot, dir) + path.sep).href;
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+    isEvalSupported: false,
+    useWorkerFetch: false,
+    wasmUrl: dirUrl('wasm'),
+    standardFontDataUrl: dirUrl('standard_fonts'),
+    cMapUrl: dirUrl('cmaps'),
+    cMapPacked: true,
+    iccUrl: dirUrl('iccs'),
+  });
+  const pdf = await withIngestionTimeout(Promise.resolve(loadingTask.promise), 45_000, 'Membuka PDF untuk ekstraksi text-layer');
+  const pages = Math.max(1, Number(pdf?.numPages || 1));
+  const blocks: string[] = [];
+  const emptyPages: number[] = [];
+  let pagesWithText = 0;
+  try {
+    for (let i = 1; i <= pages; i++) {
+      let pageText = '';
+      try {
+        const page: any = await withIngestionTimeout(Promise.resolve(pdf.getPage(i)), 20_000, `Membuka text-layer PDF halaman ${i}`);
+        const content: any = await withIngestionTimeout(Promise.resolve(page.getTextContent()), 25_000, `Membaca text-layer PDF halaman ${i}`);
+        let raw = '';
+        for (const item of Array.isArray(content?.items) ? content.items : []) {
+          const str = typeof item?.str === 'string' ? item.str : '';
+          if (!str) continue;
+          raw += str;
+          raw += item?.hasEOL ? '\n' : ' ';
+        }
+        pageText = normalizeLegalText(raw);
+        // A searchable PDF may itself contain an OCR-generated text layer. Run the
+        // same span-level noise guard before accepting it as authoritative input;
+        // otherwise garbage embedded OCR can bypass the image-OCR quality path.
+        pageText = applyOcrSpanQualityGuard(pageText).text;
+        try { page.cleanup?.(); } catch { /* best effort */ }
+      } catch {
+        pageText = '';
+      }
+      if (textLayerPageLooksUsable(pageText)) pagesWithText++;
+      else emptyPages.push(i);
+      blocks.push(`--- HALAMAN ${i} ---\n${pageText}`.trimEnd());
+    }
+  } finally {
+    try { await pdf.destroy?.(); } catch { /* best effort */ }
+  }
+  return {
+    text: blocks.join('\n\n'),
+    pages,
+    pages_with_text: pagesWithText,
+    coverage_ratio: pagesWithText / Math.max(1, pages),
+    empty_pages: emptyPages,
+  };
+}
+
 export type DocumentIngestionProgress = {
   percent: number;
   stage: 'OCR_PREPARE' | 'OCR_PAGE' | 'OCR_COMPLETE';
   detail: string;
   page?: number;
   pages?: number;
+  page_percent?: number;
+  pages_completed?: number;
+  failed_pages?: number[];
 };
 
 type DocumentIngestionProgressCallback = (progress: DocumentIngestionProgress) => void;
@@ -339,6 +433,7 @@ export function applyOcrSpanQualityGuard(text: string): {
 export function applyOcrSourceQualityGuard(
   text: string,
   pageConfidences: Array<{ page: number; confidence: number; status: 'OK' | 'FAILED' }> = [],
+  totalPages?: number,
 ): {
   text: string;
   status: 'GOOD' | 'REVIEW_REQUIRED' | 'INSUFFICIENT';
@@ -348,27 +443,54 @@ export function applyOcrSourceQualityGuard(
   excluded_pages: number[];
   excluded_spans: number;
   repaired_spans: number;
+  page_coverage: number;
+  minimum_page_coverage: number;
+  missing_pages: number;
+  weak_content_pages: number[];
 } {
   const threshold = ocrAnalysisThreshold();
-  const lowConfidencePages = pageConfidences
-    .filter(p => p.status === 'OK' && Number(p.confidence || 0) < 75)
-    .map(p => p.page);
-  const excludedPages = pageConfidences
-    .filter(p => p.status === 'FAILED' || Number(p.confidence || 0) < threshold)
-    .map(p => p.page);
+
+  // Build a content-aware page signal before applying the confidence threshold.
+  // Tesseract confidence alone is not reliable enough to decide whether a legal
+  // page is semantically usable. Dense forms, tables, stamps, and photocopies can
+  // score <60 while still producing coherent Indonesian legal prose.
+  const pageTextByNumber = new Map<number, string>();
+  for (const page of splitMarkedPages(String(text || ''))) {
+    pageTextByNumber.set(Number(page.page), String(page.text || '').trim());
+  }
+  // Single-image OCR legitimately has no PDF-style page marker. Treat the
+  // complete OCR result as page 1 so the canonical quality guard evaluates
+  // production image OCR instead of deleting otherwise usable text.
+  if (!pageTextByNumber.size && (totalPages || pageConfidences.length || 1) === 1 && String(text || '').trim()) {
+    pageTextByNumber.set(Number(pageConfidences[0]?.page || 1), String(text || '').trim());
+  }
+  const enrichedPageConfidences = (Array.isArray(pageConfidences) ? pageConfidences : []).map((row:any) => {
+    const pageText = pageTextByNumber.get(Number(row?.page)) || '';
+    const quality = assessOcrExtractedPage(pageText);
+    return {
+      ...row,
+      content_present: quality.content_present,
+      content_usable: quality.content_usable,
+      text_length: quality.normalized_length,
+    };
+  });
+
+  const coveragePolicy = assessOcrPageCoverage(enrichedPageConfidences, totalPages || enrichedPageConfidences.length || 1, threshold);
+  const lowConfidencePages = coveragePolicy.lowConfidencePages;
+  const excludedPages = coveragePolicy.excludedPages;
   const excluded = new Set(excludedPages);
-  const usablePages = pageConfidences.filter(p => p.status === 'OK' && !excluded.has(p.page)).length;
+  const usablePages = coveragePolicy.usablePages;
 
   let guardedText = String(text || '');
-  const pageBlock = /--- HALAMAN\s+(\d+)\s+---\n([\s\S]*?)(?=\n\n--- HALAMAN\s+\d+\s+---|$)/g;
-  const matches = [...guardedText.matchAll(pageBlock)];
-  if (matches.length) {
-    guardedText = matches.map(m => {
-      const page = Number(m[1]);
+  const guardedPages = splitMarkedPages(guardedText);
+  const hasMarkers = /---\s*HALAMAN\s+\d+\s*---/i.test(guardedText);
+  if (hasMarkers && guardedPages.length) {
+    guardedText = guardedPages.map((row:any) => {
+      const page = Number(row.page);
       if (excluded.has(page)) {
-        return `--- HALAMAN ${page} ---\n[HALAMAN DIKELUARKAN DARI ANALISIS OTOMATIS KARENA KUALITAS OCR RENDAH]`;
+        return `--- HALAMAN ${page} ---`; // keep page provenance, but never feed system warning text into legal semantics
       }
-      return m[0].trim();
+      return `--- HALAMAN ${page} ---\n${String(row.text || '').trim()}`.trimEnd();
     }).join('\n\n');
   } else if (pageConfidences.length === 1 && excluded.has(pageConfidences[0].page)) {
     guardedText = '';
@@ -377,9 +499,9 @@ export function applyOcrSourceQualityGuard(
   const spanGuard = applyOcrSpanQualityGuard(guardedText);
   guardedText = spanGuard.text;
 
-  const status = usablePages <= 0 && pageConfidences.length > 0
+  const status = coveragePolicy.status === 'INSUFFICIENT'
     ? 'INSUFFICIENT'
-    : excludedPages.length > 0 || lowConfidencePages.length > 0 || spanGuard.excluded_spans > 0 || spanGuard.repaired_spans > 0
+    : excludedPages.length > 0 || lowConfidencePages.length > 0 || coveragePolicy.missingPages > 0 || spanGuard.excluded_spans > 0 || spanGuard.repaired_spans > 0
       ? 'REVIEW_REQUIRED'
       : 'GOOD';
 
@@ -392,6 +514,10 @@ export function applyOcrSourceQualityGuard(
     excluded_pages: excludedPages,
     excluded_spans: spanGuard.excluded_spans,
     repaired_spans: spanGuard.repaired_spans,
+    page_coverage: coveragePolicy.pageCoverage,
+    minimum_page_coverage: coveragePolicy.minCoverage,
+    missing_pages: coveragePolicy.missingPages,
+    weak_content_pages: coveragePolicy.weakContentPages || [],
   };
 }
 
@@ -402,8 +528,10 @@ function ocrCoverage(text: string, confidence = 0): { coverage: number; manualRe
   const unreadable = lines.filter(v => /\[TIDAK TERBACA\]/i.test(v)).length;
   const suspicious = lines.filter(v => (v.match(/\?/g) || []).length >= Math.max(4, Math.floor(v.length * 0.2))).length;
   const structuralCoverage = Math.max(0, Math.min(1, 1 - (unreadable + suspicious) / Math.max(1, lines.length)));
-  const confidenceCoverage = confidence > 0 ? Math.max(0, Math.min(1, confidence / 100)) : structuralCoverage;
-  const coverage = Math.min(structuralCoverage, confidenceCoverage);
+  // Coverage answers 'how much source text survived ingestion'; confidence answers
+  // 'how certain Tesseract is about character recognition'. Never reduce document
+  // coverage merely because OCR confidence is low.
+  const coverage = structuralCoverage;
   return { coverage, manualReview: coverage < 0.86 || unreadable > 0 || confidence < 70 };
 }
 
@@ -428,34 +556,72 @@ export async function extractUploadedDocument(buffer: Buffer, originalName: stri
     return { text, mode: 'DOCX_LOCAL', coverage_ratio: 1, manual_review_required: false };
   }
   if (ext === '.pdf' || mimeType === 'application/pdf') {
-    const local = extractPdfText(buffer);
-    if (local.text.length >= 200) {
-      return { text: local.text, mode: 'PDF_LOCAL_TEXT', pages_total: local.pages, coverage_ratio: 1, manual_review_required: false };
+    // Prefer PDF.js text-layer extraction. The legacy stream-regex extractor can
+    // miss object streams/xref-compressed PDFs and previously misclassified a
+    // fully searchable legal PDF as image-only, forcing unnecessary OCR.
+    let textLayer: { text:string; pages:number; pages_with_text:number; coverage_ratio:number; empty_pages:number[] } | null = null;
+    try {
+      textLayer = await extractPdfTextLayer(buffer);
+    } catch {
+      const legacy = extractPdfTextLegacy(buffer);
+      if (legacy.text.length >= 200 && legacy.pages <= 1) {
+        textLayer = { text:`--- HALAMAN 1 ---\n${legacy.text}`, pages:1, pages_with_text:1, coverage_ratio:1, empty_pages:[] };
+      }
+    }
+    if (textLayer && textLayer.text.length >= 200 && textLayer.coverage_ratio >= 0.95) {
+      // Text-layer extraction already knows exactly which PDF pages yielded text.
+      // Preserve that text verbatim; do not pass it through OCR confidence/exclusion
+      // logic, which can shift page-block boundaries after an empty page.
+      const sourceQuality = {
+        status: (textLayer.empty_pages.length ? 'REVIEW_REQUIRED' : 'GOOD') as 'GOOD'|'REVIEW_REQUIRED',
+        minimum_analysis_confidence: ocrAnalysisThreshold(),
+        usable_pages: textLayer.pages_with_text,
+        low_confidence_pages: [] as number[],
+        excluded_pages: [...textLayer.empty_pages],
+        excluded_spans: 0,
+        repaired_spans: 0,
+        page_coverage: textLayer.coverage_ratio,
+        minimum_page_coverage: 0.95,
+        missing_pages: textLayer.empty_pages.length,
+        weak_content_pages: [] as number[],
+      };
+      return {
+        text: normalizeLegalText(textLayer.text),
+        mode: 'PDF_LOCAL_TEXT',
+        pages_total: textLayer.pages,
+        pages_ocr: textLayer.pages_with_text,
+        coverage_ratio: textLayer.coverage_ratio,
+        manual_review_required: sourceQuality.status !== 'GOOD',
+        failed_pages: [...textLayer.empty_pages],
+        source_quality: sourceQuality,
+        warning: textLayer.empty_pages.length ? `Text-layer PDF tidak menghasilkan teks material pada halaman ${textLayer.empty_pages.join(', ')}; periksa halaman tersebut secara manual.` : undefined,
+      };
     }
 
-    // Image-only/scanned PDF: render every page locally and run Tesseract OCR.
+    // Image-only/scanned or materially incomplete text-layer PDF: render every
+    // page locally and run Tesseract OCR. No external AI/API key is required.
     // No Gemini/Google API key is required for document reading.
     try {
       const localOcr = await ocrPdfLocal(buffer, onProgress);
       const rawText = normalizeLegalText(localOcr.text);
       if (rawText.length < 80) throw new Error(`hasil OCR terlalu pendek (${rawText.length} karakter)`);
-      const sourceQuality = applyOcrSourceQualityGuard(rawText, localOcr.page_confidences);
+      const sourceQuality = applyOcrSourceQualityGuard(rawText, localOcr.page_confidences, localOcr.pages);
       const text = normalizeLegalText(sourceQuality.text);
       if (sourceQuality.status === 'INSUFFICIENT' || text.length < 80) {
-        throw new Error(`kualitas OCR tidak cukup untuk analisis otomatis; periksa dokumen asli atau unggah scan yang lebih jelas`);
+        throw new Error(`kualitas OCR tidak cukup untuk analisis otomatis (halaman terbaca ${sourceQuality.usable_pages}/${localOcr.pages || 1}; halaman dikeluarkan ${sourceQuality.excluded_pages.length}; halaman gagal ${(localOcr.failed_pages || []).length}; confidence rata-rata ${Math.round(localOcr.average_confidence)}%; teks tersisa ${text.length} karakter); periksa dokumen asli atau unggah scan yang lebih jelas`);
       }
       const quality = ocrCoverage(text, localOcr.average_confidence);
-      const pagesTotal = localOcr.pages || local.pages || 1;
+      const pagesTotal = localOcr.pages || textLayer?.pages || 1;
       const pagesSucceeded = localOcr.pages_succeeded || Math.max(0, pagesTotal - (localOcr.failed_pages?.length || 0));
       const pageCoverage = pagesSucceeded / Math.max(1, pagesTotal);
-      const coverage = Math.min(quality.coverage, pageCoverage);
+      const coverage = Math.min(quality.coverage, pageCoverage, sourceQuality.page_coverage);
       const failedPages = localOcr.failed_pages || [];
       const manualReview = quality.manualReview || failedPages.length > 0 || pageCoverage < 0.999 || sourceQuality.status !== 'GOOD';
       return {
         text,
         mode: 'LOCAL_OCR',
         pages_total: pagesTotal,
-        pages_ocr: pagesSucceeded,
+        pages_ocr: sourceQuality.usable_pages,
         coverage_ratio: coverage,
         manual_review_required: manualReview,
         average_ocr_confidence: localOcr.average_confidence,
@@ -463,7 +629,7 @@ export async function extractUploadedDocument(buffer: Buffer, originalName: stri
         failed_pages: failedPages,
         source_quality: sourceQuality,
         warning: sourceQuality.excluded_pages.length
-          ? `OCR lokal mengecualikan halaman ${sourceQuality.excluded_pages.join(', ')} dari analisis otomatis karena kualitasnya di bawah ambang ${sourceQuality.minimum_analysis_confidence}%. Cocokkan halaman tersebut dengan dokumen asli.`
+          ? `OCR lokal mengecualikan halaman ${sourceQuality.excluded_pages.join(', ')} karena halaman gagal atau tidak menghasilkan teks yang cukup terbaca. Cocokkan halaman tersebut dengan dokumen asli.`
           : (sourceQuality.excluded_spans || 0) > 0 || (sourceQuality.repaired_spans || 0) > 0
           ? `OCR lokal menahan ${sourceQuality.excluded_spans || 0} potongan teks yang terindikasi rusak dan menormalkan ${sourceQuality.repaired_spans || 0} potongan struktur. Cocokkan bagian penting dengan dokumen asli.`
           : failedPages.length
@@ -481,9 +647,9 @@ export async function extractUploadedDocument(buffer: Buffer, originalName: stri
       const localOcr = await ocrImageLocal(buffer, onProgress);
       const rawText = normalizeLegalText(localOcr.text);
       if (rawText.length < 40) throw new Error(`hasil OCR terlalu pendek (${rawText.length} karakter)`);
-      const sourceQuality = applyOcrSourceQualityGuard(rawText, localOcr.page_confidences);
+      const sourceQuality = applyOcrSourceQualityGuard(rawText, localOcr.page_confidences, localOcr.pages);
       if (sourceQuality.status === 'INSUFFICIENT') {
-        throw new Error(`kualitas OCR ${Math.round(localOcr.average_confidence)}% berada di bawah ambang analisis otomatis ${sourceQuality.minimum_analysis_confidence}%; unggah gambar yang lebih jelas`);
+        throw new Error(`hasil OCR tidak menyediakan teks yang cukup untuk analisis otomatis (confidence ${Math.round(localOcr.average_confidence)}%; halaman terbaca ${sourceQuality.usable_pages}/${localOcr.pages || 1}); unggah gambar yang lebih jelas`);
       }
       const text = normalizeLegalText(sourceQuality.text);
       const quality = ocrCoverage(text, localOcr.average_confidence);

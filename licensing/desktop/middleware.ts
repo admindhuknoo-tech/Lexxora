@@ -1,60 +1,27 @@
-// LexiCore Desktop — gate the local Express server (that the desktop shell
-// wraps, e.g. via Electron/Tauri loading http://127.0.0.1:PORT) on license
-// status. Integration: in server.ts, mount this before the app's API routes.
+// LexiCore Desktop — gate the app's API on license status.
+// The actual /api/license/* routes live directly in server.ts (see the
+// "License & Profile" section there) since that matches this project's
+// existing style of defining routes inline rather than via sub-routers.
+// This file only exports the gate, for use as:
 //
-//   import { requireDesktopLicense } from './licensing/desktop/middleware';
 //   app.use('/api', requireDesktopLicense());
 //
-// Leaves /api/license/* (status + activation endpoints) unauthenticated so
-// the activation screen itself can always load.
+// mounted AFTER the /api/license/* routes so those stay reachable pre-activation.
 
 import type { Request, Response, NextFunction } from 'express';
-import { getLicenseStatus, activateWithKey } from './license';
-import { getDeviceId } from './fingerprint';
+import { getLicenseStatus } from './license';
 
 export function requireDesktopLicense() {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith('/license')) return next(); // status/activation routes stay open
+    if (req.path.startsWith('/license')) return next(); // status/install/remove stay open
 
     const status = getLicenseStatus();
-    if (status.state === 'active') {
-      // Demo edition: expose remaining days + a soft flag so the frontend can
-      // show a watermark/banner without a hard block.
-      res.setHeader('X-LexiCore-License', status.edition);
-      if (status.daysRemaining !== null) res.setHeader('X-LexiCore-Days-Remaining', String(status.daysRemaining));
+    if (status.allowed) {
+      res.setHeader('X-LexiCore-License', status.status);
+      if (status.expires_at) res.setHeader('X-LexiCore-Expires-At', status.expires_at);
       return next();
     }
 
-    res.status(402).json({
-      error: 'LICENSE_REQUIRED',
-      state: status.state,
-      reason: 'reason' in status ? status.reason : undefined,
-      deviceId: 'deviceId' in status ? status.deviceId : undefined,
-    });
+    res.status(402).json({ success: false, error: 'LICENSE_REQUIRED', data: status });
   };
-}
-
-/** Mount at app.use('/api/license', desktopLicenseRoutes()) */
-export function desktopLicenseRoutes() {
-  const { Router } = require('express');
-  const router = Router();
-
-  router.get('/status', (_req: Request, res: Response) => {
-    const status = getLicenseStatus();
-    res.json(status);
-  });
-
-  router.get('/device-id', (_req: Request, res: Response) => {
-    res.json(getDeviceId());
-  });
-
-  router.post('/activate', (req: Request, res: Response) => {
-    const key = (req.body?.key || '').toString();
-    if (!key) return res.status(400).json({ error: 'MISSING_KEY' });
-    const result = activateWithKey(key);
-    if (result.ok === false) return res.status(400).json({ error: 'INVALID_KEY', reason: result.reason });
-    res.json({ ok: true, status: getLicenseStatus() });
-  });
-
-  return router;
 }

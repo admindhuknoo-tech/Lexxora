@@ -2,6 +2,7 @@ declare const process: any;
 import fs from 'node:fs';
 import path from 'node:path';
 import { inferLegalContext, officialQueriesForContext } from '../server/legalOntology';
+import { buildAuthorityProviderPlan } from '../server/officialLawRetriever';
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -18,7 +19,8 @@ check('1.1 authority-oriented expansion installed', /function authorityOrientedQ
 check('1.2 authority query budget fixed at 6', /AUTHORITY_QUERY_TOKEN_BUDGET\s*=\s*6/.test(ontologySrc));
 check('1.3 no regulation-number shortcut in expansion block', !/authorityOrientedQuery[\s\S]{0,5000}\b(?:UU|PP)\s*(?:No\.?|Nomor)?\s*\d+/i.test(ontologySrc));
 check('1.4 V6.7.9 fair scheduler preserved', /function scheduleQueryPlans\s*\(/.test(ontologySrc));
-check('1.5 provider network cap remains 8', /input\.queries\.slice\(0,\s*8\)/.test(retrieverSrc));
+const providerPlanProbe=buildAuthorityProviderPlan(['a','b','c','d','e','f','g','h','i','j','k'],'hybrid');
+check('1.5 provider-aware network plan remains bounded <=10 with judicial reservation', providerPlanProbe.total_query_slots<=10 && providerPlanProbe.regulation_queries.length<=6 && providerPlanProbe.judicial_product_queries.length<=2 && providerPlanProbe.case_law_queries.length<=2, JSON.stringify(providerPlanProbe));
 check('1.6 V6.7.8 adaptive topical policy preserved', /function profileQueryForTopicalPolicy\s*\(/.test(retrieverSrc));
 check('1.7 legacy threshold 14 not restored', !/minScore\s*=\s*minHits\s*>=\s*2\s*\?\s*14\s*:\s*11/.test(retrieverSrc));
 

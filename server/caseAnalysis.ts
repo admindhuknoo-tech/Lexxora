@@ -6,7 +6,11 @@ import { buildEvidenceModel, classifySourceRole } from './evidenceModel';
 import { inferLegalContext, authorityAnchorsForContext, deriveOntologyIssues, LEGAL_DOMAIN_PROFILES, LegalDomainId } from './legalOntology';
 import { reasonForensically } from './forensicReasoner';
 import { buildLawyerWorkflow } from './lawyerWorkflow';
+import { resolveProceduralPosture, type ProceduralStage as AuthorityProceduralStage } from './proceduralPosture';
 import { PipelineTracer } from './pipelineTrace';
+
+export const CASE_ANALYSIS_CONTRACT_VERSION = 'LEXICORE_CANONICAL_ANALYSIS_V8';
+import { validateReasoningDocumentIntegrity, validateSemanticModelIntegrity, splitMarkedPages } from './caseIntegrityPolicy.mjs';
 
 export interface CaseAnalysisInput {
   title: string;
@@ -23,9 +27,15 @@ export interface CaseAnalysisInput {
   // (draft, compliance assessment) inherits the same identity automatically.
   client_id?: string;
   client_name?: string;
+  // Optional runtime progress callback supplied by the HTTP layer.
+  // Percent is bounded to the Case Analysis phase (65..99) by server.ts.
+  on_progress?: (progress: { percent: number; stage: string; detail: string }) => void;
+  // Optional reserved history record. Long-running HTTP jobs create this before OCR
+  // so the matter remains visible/recoverable even if the browser request times out.
+  existing_case_id?: number;
 }
 
-type ApplicableLaw = { domain:string;source:string;status:string;regulation:string;article:string;relevance:string;source_url?:string;verification_status?:string;tempus_status?:string };
+type ApplicableLaw = { domain:string;source:string;status:string;regulation:string;article:string;relevance:string;source_url?:string;verification_status?:string;tempus_status?:string;authority_identity?:string;index_backed?:boolean;article_text_pool?:string;instrument_type?:string;number?:string;year?:number };
 type RegulatoryMode = 'offline' | 'hybrid' | 'online';
 
 function normalizeRegulatoryMode(value: unknown): RegulatoryMode {
@@ -36,6 +46,10 @@ function normalizeRegulatoryMode(value: unknown): RegulatoryMode {
 }
 function regulatoryModeLabel(mode: RegulatoryMode) {
   return mode === 'offline' ? 'LOCAL_ONLY' : mode === 'online' ? 'OFFICIAL_ONLINE_ONLY' : 'LOCAL_PLUS_OFFICIAL_ONLINE';
+}
+
+function reportCaseProgress(input: CaseAnalysisInput, percent: number, stage: string, detail: string) {
+  try { input.on_progress?.({ percent, stage, detail }); } catch { /* progress reporting must never break analysis */ }
 }
 
 const LEVEL_SCORE: Record<CaseRiskItem['level'], number> = { HIGH: 85, MEDIUM: 55, LOW: 25 };
@@ -62,16 +76,7 @@ function unique<T>(items: T[]): T[] { return [...new Set(items)]; }
 
 type SourcePage = { page: number; text: string };
 function splitSourcePages(text: string): SourcePage[] {
-  const marker = /---\s*HALAMAN\s+(\d+)\s*---/gi;
-  const matches = [...text.matchAll(marker)];
-  if (!matches.length) return [{ page: 1, text }];
-  const pages: SourcePage[] = [];
-  for (let i = 0; i < matches.length; i++) {
-    const start = (matches[i].index || 0) + matches[i][0].length;
-    const end = i + 1 < matches.length ? (matches[i + 1].index || text.length) : text.length;
-    pages.push({ page: Number(matches[i][1]) || i + 1, text: safeString(text.slice(start, end)) });
-  }
-  return pages;
+  return splitMarkedPages(text).map((p:any)=>({ page:Number(p.page)||1, text:safeString(p.text) }));
 }
 function buildPageBalancedAnalysisText(text: string, maxChars = 110000) {
   const pages = splitSourcePages(text);
@@ -141,7 +146,7 @@ function extractSourceLawCitations(text: string): ApplicableLaw[] {
         if (a) articles.push(safeString(a[0]));
       }
     }
-    out.push({ domain:'Rujukan eksplisit dokumen', source:reg, status:'SOURCE_CITED_UNVERIFIED', regulation:reg, article: unique(articles).slice(0,8).join(', ') || 'PERLU VERIFIKASI', relevance:'Rujukan disebut langsung dalam dokumen sumber. Identitas instrumen, versi pada tempus perkara, bunyi pasal, dan penerapannya tetap harus diverifikasi.' });
+    out.push({ domain:'Rujukan eksplisit dokumen', source:reg, status:'SOURCE_CITED_UNVERIFIED', regulation:reg, article: unique(articles).slice(0,8).join(', ') || 'PERLU VERIFIKASI', relevance:'Rujukan disebut langsung dalam dokumen sumber. Identitas instrumen, versi pada tempus perkara, bunyi pasal, dan penerapannya tetap harus diverifikasi.', authority_identity:authorityIdentityKey({source_kind:'LOCAL',instrument_type:safeString(m[1]),number:safeString(m[2]),year:Number(m[3]),source_label:reg}), article_text_pool:safeString(local), instrument_type:safeString(m[1]), number:safeString(m[2]), year:Number(m[3]) });
   }
   return out.slice(0, 16);
 }
@@ -554,7 +559,7 @@ function reconcileLegalContextWithRegime(
   // A profile-less placeholder (the "belum final" fallback) carries no issue templates
   // downstream (see deriveOntologyIssues' `.filter(x=>x.profile)`); it must not be
   // reintroduced as a secondary domain candidate just because regime sync displaced it.
-  const carryPrior=priorPrimary.profile ? [priorPrimary as (typeof raw.scores)[number]] : [];
+  const carryPrior=priorPrimary.profile && (priorPrimary as any).material_nexus!==false ? [priorPrimary as (typeof raw.scores)[number]] : [];
   const secondary=[
     ...carryPrior,
     ...(raw.secondary||[]).filter((x:any)=>x.id!==target.id && x.id!==priorPrimary.id),
@@ -639,6 +644,70 @@ function applyRegimeGuard(
 ): { tier:'HIGH'|'MEDIUM'|'LOW'; note:string|null } {
   const scope = inferredRegimeScope(reg);
   const instrumentForum = inferredJurisdictionForum(reg);
+  return applyRegimeGuardCore(scope, instrumentForum, currentTier, regimeCtx, true);
+}
+
+// V7.0.2.22 — procedural-authority precision. OFFICIAL/judicial candidates
+// (SEMA, PERMA, Rumusan Kamar, Putusan, JDIH_BPK regulations) previously
+// bypassed forum/regime screening entirely: applyRegimeGuard was only ever
+// called for LOCAL corpus regulations, and the OFFICIAL bindingPool hardcoded
+// regime_note:null for every candidate. A Putusan Pengadilan Agama or a SEMA
+// on peradilan militer procedure could therefore be bound and promoted as
+// "Utama" authority for a case whose own forum/regime is plainly different,
+// with no mismatch signal at all — while the identical situation for a LOCAL
+// regulation was already correctly downgraded and, since the guard above
+// rejects any bound regime_note outright, hard-rejected. This closes that
+// asymmetry using the exact same, already field-tested classification logic
+// as inferredRegimeScope/inferredJurisdictionForum — sourced only from the
+// candidate's own title, excerpt, court, and judicial_product_type (document
+// content), never from the search query or catalog keywords, consistent with
+// the precision rules already established for article_text_pool.
+function inferredOfficialRegimeScope(c:any): InstrumentRegimeScope {
+  const hay = normalizeSearchToken(`${c.title||''} ${c.excerpt||''} ${(c as any).judicial_product_type||''} ${(c as any).authority_class||''}`);
+  if (/kuhp|kuhap|tindak pidana|pidana khusus|tipikor|korupsi|narkotika|terorisme|pencucian uang/.test(hay)) return 'CRIMINAL';
+  if (/kompilasi hukum islam|\bkhi\b|peradilan agama|pengadilan agama|waris islam|ekonomi syariah/.test(hay)) return 'ISLAMIC';
+  if (/ptun|tata usaha negara|\bktun\b|administrasi negara/.test(hay)) return 'ADMINISTRATIVE';
+  if (/burgerlijk|staatsblad 1847|kuhperdata|kitab undang undang hukum perdata|perikatan|wanprestasi/.test(hay)) return 'CIVIL';
+  if (/hukum adat|masyarakat hukum adat|\bulayat\b|tanah adat/.test(hay)) return 'CUSTOMARY';
+  if (/peradilan militer|pengadilan militer/.test(hay)) return 'MILITARY';
+  return 'UNIVERSAL';
+}
+
+function inferredOfficialJurisdictionForum(c:any): 'UMUM'|'AGAMA'|'MILITER'|'TUN'|'NIAGA'|'ANY' {
+  const court = normalizeSearchToken(safeString((c as any).court||''));
+  const hay = normalizeSearchToken(`${c.title||''} ${c.excerpt||''} ${court}`);
+  if (/peradilan agama|pengadilan agama/.test(hay) || /^pa\b/.test(court)) return 'AGAMA';
+  if (/peradilan militer|pengadilan militer/.test(hay)) return 'MILITER';
+  if (/tata usaha negara|\bptun\b/.test(hay)) return 'TUN';
+  if (/pengadilan niaga|peradilan niaga/.test(hay)) return 'NIAGA';
+  if (/peradilan umum|pengadilan negeri/.test(hay) || /^pn\b/.test(court)) return 'UMUM';
+  return 'ANY';
+}
+
+// Shared core so LOCAL and OFFICIAL candidates are held to the identical
+// standard by construction, not by two independently-maintained copies.
+//
+// strictOnUnspecified controls whether an UNKNOWN case-side dimension (forum
+// or regime not stated in the narrative) itself counts as a caution signal:
+// - LOCAL (true, preserves original behaviour exactly): most local-corpus
+//   regulations are UNIVERSAL/ANY scope, so a regulation with a narrow,
+//   specific scope is itself a deliberate signal worth a caution note even
+//   before comparing it to the case.
+// - OFFICIAL/judicial (false): every judicial decision by definition has a
+//   specific court (e.g. "PN Jakarta") — that is not an anomaly, it is simply
+//   what a decision is. Treating "case forum not explicitly stated in the
+//   narrative" as a mismatch signal would downgrade or hard-reject nearly
+//   every judicial decision whenever the client narrative does not spell out
+//   the court by name, which is the common case, not the exception. Only an
+//   actual, positive conflict (both sides known and different) is evidence
+//   of a real applicability problem.
+function applyRegimeGuardCore(
+  scope: InstrumentRegimeScope,
+  instrumentForum: 'UMUM'|'AGAMA'|'MILITER'|'TUN'|'NIAGA'|'ANY',
+  currentTier:'HIGH'|'MEDIUM'|'LOW',
+  regimeCtx:RegimeContext,
+  strictOnUnspecified:boolean=true,
+): { tier:'HIGH'|'MEDIUM'|'LOW'; note:string|null } {
   const { forum, regime } = regimeCtx;
   let tier = currentTier;
   const notes:string[]=[];
@@ -647,8 +716,10 @@ function applyRegimeGuard(
   // Never infer CIVIL merely because forum=UMUM.
   if (scope !== 'UNIVERSAL' && scope !== 'OTHER' && scope !== 'MILITARY') {
     if (regime === 'UNSPECIFIED') {
-      tier = downgradeTier(tier,1);
-      notes.push(`rezim perkara belum terkunci; lingkup instrumen=${scope}`);
+      if (strictOnUnspecified) {
+        tier = downgradeTier(tier,1);
+        notes.push(`rezim perkara belum terkunci; lingkup instrumen=${scope}`);
+      }
     } else if (regime === 'AMBIGUOUS') {
       tier = downgradeTier(tier,1);
       notes.push(`rezim perkara ambigu; lingkup instrumen=${scope}`);
@@ -660,8 +731,10 @@ function applyRegimeGuard(
 
   if (instrumentForum !== 'ANY') {
     if (forum === 'UNSPECIFIED') {
-      tier = downgradeTier(tier,1);
-      notes.push(`forum perkara belum terkunci; forum instrumen=${instrumentForum}`);
+      if (strictOnUnspecified) {
+        tier = downgradeTier(tier,1);
+        notes.push(`forum perkara belum terkunci; forum instrumen=${instrumentForum}`);
+      }
     } else if (instrumentForum !== forum) {
       tier = downgradeTier(tier,2);
       notes.push(`forum instrumen=${instrumentForum} tidak cocok dengan forum perkara=${forum}`);
@@ -670,6 +743,22 @@ function applyRegimeGuard(
 
   return { tier, note: notes.length ? notes.join('; ') : null };
 }
+
+function applyOfficialRegimeGuard(
+  c:any,
+  currentTier:'HIGH'|'MEDIUM',
+  regimeCtx:RegimeContext,
+): { tier:'HIGH'|'MEDIUM'; note:string|null } {
+  const scope = inferredOfficialRegimeScope(c);
+  const instrumentForum = inferredOfficialJurisdictionForum(c);
+  const guarded = applyRegimeGuardCore(scope, instrumentForum, currentTier, regimeCtx, false);
+  // OFFICIAL candidates only carry a two-level tier (HIGH/MEDIUM); a guard
+  // downgrade still surfaces via regime_note and the existing hard-reject-on-
+  // note gate, matching how a LOCAL candidate downgraded past LOW is excluded
+  // rather than silently kept.
+  return { tier: guarded.tier==='HIGH'?'HIGH':'MEDIUM', note: guarded.note };
+}
+
 
 function stage1LexicalScore(reg: LegalRegulation, tokens: string[]): number {
   // Stage-1 deliberately stays broad. Article bodies are excluded here so
@@ -746,18 +835,27 @@ function scoreArticleMaterial(
   if (!hay) return { score: 0, matched: false };
 
   let score = 0;
+  // `matched` is deliberately issue-specific. Domain anchors may re-rank an
+  // article that already answers the issue, but they can no longer create a
+  // false article-level nexus on their own. This prevents broad labels such as
+  // "perkawinan" or "pertanahan" from being emitted as "pasal relevan"
+  // when the article does not contain the issue's substantive terms.
   let matched = false;
 
-  for (const raw of issueTerms) {
-    const t = normalizeSearchToken(raw);
-    if (t.length < 4 || !hay.includes(t)) continue;
-    matched = true;
-    score += t.includes(' ') ? 8 : 4;
+  const normalizedIssueTerms=unique(issueTerms.map(normalizeSearchToken).filter(t=>t.length>=4));
+  const hasSpecificPhrase=normalizedIssueTerms.some(t=>t.includes(' '));
+  for (const t of normalizedIssueTerms) {
+    if (!hay.includes(t)) continue;
+    // When the issue supplies specific multi-word concepts, a generic single
+    // domain word may help rank but cannot by itself establish article nexus.
+    // Example: "perkawinan" must not make divorce/validity categories count
+    // as the relevant article for an issue specifically about harta bersama.
+    if (t.includes(' ') || !hasSpecificPhrase) matched = true;
+    score += t.includes(' ') ? 8 : 2;
   }
   for (const raw of anchors) {
     const a = normalizeSearchToken(raw);
     if (a.length < 4 || !hay.includes(a)) continue;
-    matched = true;
     score += a.includes(' ') ? 4 : 2;
   }
 
@@ -881,7 +979,7 @@ function stage2MaterialScore(
     secondary_aligned,
     foreign_aligned,
     domain_alignment,
-    ranked_articles: rankedArticles.filter((x:any) => x.score > 0).slice(0, 5).map((x:any) => x.article),
+    ranked_articles: rankedArticles.filter((x:any) => x.matched && x.score > 0).slice(0, 5).map((x:any) => x.article),
   };
 }
 
@@ -1187,6 +1285,21 @@ interface BindableCandidate {
   year?: number;
   effective_status?: string;
   tempus_status: 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE';
+  // Pre-verified topical nexus score from officialLawRetriever.ts's own topical
+  // acceptance gate (SEMA/PERMA/Putusan candidates already passed this before
+  // being surfaced). Carried through so the independent issue-binding gate below
+  // treats it as corroborating evidence instead of silently discarding it.
+  upstream_nexus_score?: number;
+  // V7.0.2.19: retrieval/catalog metadata (e.g. OFFICIAL_INDEX entry.keywords),
+  // kept for diagnostics only. These MUST NOT satisfy issue-binding gates —
+  // a keyword tag is a categorization label assigned by whoever built the
+  // index, not textual evidence that the document itself discusses the issue.
+  metadata_keywords?: string[];
+  evidence_origin?: 'DOCUMENT_CONTENT' | 'CATALOG_METADATA';
+  // LOCAL-only: the regulation's raw article list, carried through so binding
+  // can re-rank articles per issue (see V7.0.2.9 article_summary precision fix
+  // below) instead of reusing one case-wide article ranking for every issue.
+  raw_articles?: Array<{ pasal?:string; topic?:string; content?:string; keywords?:string[] }>;
 }
 
 interface BoundAuthority {
@@ -1309,6 +1422,127 @@ function hasConsumerRelationshipEvidence(caseText:string):boolean {
   return false;
 }
 
+
+const LOCAL_ISSUES_REQUIRING_ARTICLE_NEXUS = new Set([
+  'remedy-procedure',
+  'civil-criminal-boundary',
+  'capacity-authority',
+  'document-authenticity',
+  'power-of-attorney',
+]);
+
+function inferProceduralAuthorityFamily(c:BindableCandidate):AuthorityProceduralStage|'GENERAL_PROCEDURE'|'SUBSTANTIVE'{
+  // A judicial decision or determination is the *output* of a case, not an
+  // instrument that itself occupies a procedural stage. Classifying it by
+  // scanning its own substantive discussion content for stage vocabulary
+  // (e.g. a wanprestasi judgment that discusses "somasi" only because that
+  // was part of the claim being decided) misfiles the whole decision into
+  // that earlier stage's family and then blocks it from binding anywhere.
+  // The instrument's own title is checked first and wins over any
+  // content-derived signal below.
+  const titleHay=normalizeSearchToken(`${c.title||''} ${c.instrument_type||''}`);
+  if(/\bputusan\b|\bpenetapan\b/.test(titleHay)) return 'SUBSTANTIVE';
+
+  const hay=normalizeSearchToken(`${c.title||''} ${(c.domain_tags||[]).join(' ')} ${c.article_text_pool||''} ${c.instrument_type||''}`);
+  if(/\beksekusi\b|\baanmaning\b|sita eksekusi|pelelangan/.test(hay)) return 'EXECUTION';
+  if(/\bbanding\b|\bkasasi\b|peninjauan kembali|\bverzet\b|memori banding|memori kasasi/.test(hay)) return 'APPEAL';
+  if(/praperadilan|penahanan|penangkapan|penyitaan|penyidikan|\bkuhap\b|hukum acara pidana/.test(hay)) return 'INVESTIGATION';
+  if(/penuntutan|penuntut umum|surat dakwaan|prapenuntutan/.test(hay)) return 'PROSECUTION';
+  if(/pembuktian|pemeriksaan saksi|alat bukti/.test(hay)) return 'EVIDENCE_HEARING';
+  // Specific stage vocabulary must win before broad words such as
+  // "pengadilan"/"permohonan". Otherwise mediation instruments become
+  // GENERAL_PROCEDURE and can leak into unrelated investigation output.
+  if(/somasi|mediasi|negosiasi|surat teguran|legal notice/.test(hay)) return 'PRE_LITIGATION';
+  if(/hukum acara|peradilan|pengadilan|kompetensi|kewenangan mengadili|syarat formil|gugatan|permohonan/.test(hay)) return 'GENERAL_PROCEDURE';
+  return 'SUBSTANTIVE';
+}
+
+function inferCandidateForum(c:BindableCandidate):DetectedForum{
+  const hay=normalizeSearchToken(`${c.title||''} ${(c.domain_tags||[]).join(' ')} ${c.article_text_pool||''}`);
+  if(/pengadilan agama|peradilan agama|mahkamah syar iyah/.test(hay)) return 'AGAMA';
+  if(/pengadilan tata usaha negara|peradilan tata usaha negara|\bptun\b/.test(hay)) return 'TUN';
+  if(/pengadilan niaga|peradilan niaga/.test(hay)) return 'NIAGA';
+  if(/pengadilan militer|peradilan militer/.test(hay)) return 'MILITER';
+  if(/pengadilan negeri|peradilan umum/.test(hay)) return 'UMUM';
+  return 'UNSPECIFIED';
+}
+
+function proceduralFamilyCompatible(stage:AuthorityProceduralStage,family:ReturnType<typeof inferProceduralAuthorityFamily>):boolean{
+  if(family==='GENERAL_PROCEDURE') return true;
+  if(family==='SUBSTANTIVE') return false;
+  if(stage==='CONSULTATION') return true;
+  if(stage==='PLEADING') return ['PLEADING','EVIDENCE_HEARING'].includes(family as any);
+  return stage===family;
+}
+
+function inferProceduralTempusYearFromCase(text:string,stage:AuthorityProceduralStage):number|undefined{
+  const now=new Date().getFullYear();
+  const stagePatterns:Record<AuthorityProceduralStage,RegExp>={
+    PRE_LITIGATION:/somasi|mediasi|negosiasi|surat teguran|surat keberatan|legal notice/i,
+    INVESTIGATION:/penyidikan|penyidik|bap|penahanan|penangkapan|penyitaan|praperadilan|tersangka/i,
+    PROSECUTION:/penuntutan|penuntut umum|surat dakwaan|dakwaan|tuntutan pidana|surat tuntutan|requisitoir/i,
+    EVIDENCE_HEARING:/pemeriksaan saksi|pembuktian|agenda sidang|alat bukti/i,
+    PLEADING:/gugatan|jawaban tergugat|jawaban penggugat|replik|repliek|duplik|eksepsi|pledoi|kesimpulan pihak|perkara nomor|sidang/i,
+    APPEAL:/memori banding|kontra memori banding|permohonan banding|banding|memori kasasi|kasasi|peninjauan kembali|permohonan pk|verzet/i,
+    EXECUTION:/permohonan eksekusi|eksekusi|aanmaning|sita eksekusi|pelelangan|dasar eksekutorial/i,
+    CONSULTATION:/^$/,
+  };
+  if(stage==='CONSULTATION') return undefined;
+  const relevant=stagePatterns[stage];
+  const raw=String(text||'');
+  const segmentRe=/[^\n.!?;:]+(?:[\n.!?;:]|$)/g;
+  const candidates:Array<{index:number;year:number;historical:boolean}>=[];
+  for(const m of raw.matchAll(segmentRe)){
+    const segment=String(m[0]||'').replace(/\s+/g,' ').trim();
+    if(!segment || !relevant.test(segment)) continue;
+    const years=(segment.match(/\b(?:19|20)\d{2}\b/g)||[]).map(Number).filter(y=>y>=1945&&y<=now);
+    if(!years.length) continue;
+    const historical=/\b(?:sebelumnya|pernah|dahulu|perkara\s+lain|riwayat|sebelum\s+itu)\b/i.test(segment);
+    for(const year of years) candidates.push({index:m.index||0,year,historical});
+  }
+  const current=candidates.filter(x=>!x.historical).sort((a,b)=>a.index-b.index);
+  if(current.length) return current[0].year;
+  return undefined;
+}
+
+function issueAuthorityCompatible(issueId:string,c:BindableCandidate,proceduralStage:AuthorityProceduralStage,caseForum:DetectedForum):{ok:boolean;reason?:string}{
+  const title=normalizeSearchToken(c.title||'');
+  const tags=normalizeSearchToken((c.domain_tags||[]).join(' '));
+  const article=normalizeSearchToken(c.article_text_pool||'');
+  const hay=`${title} ${tags}`;
+  const family=inferProceduralAuthorityFamily(c);
+
+  // General invariant: a stage-specific procedural authority must never bind
+  // outside its procedural stage, regardless of which ontology issue happens
+  // to request it. Previously this guard only ran for remedy-procedure, which
+  // allowed appellate authority to leak into investigation issues.
+  if(family!=='SUBSTANTIVE' && family!=='GENERAL_PROCEDURE' && proceduralStage!=='CONSULTATION' && !proceduralFamilyCompatible(proceduralStage,family)){
+    return {ok:false,reason:`authority prosedural family=${family} tidak cocok dengan tahap perkara=${proceduralStage}`};
+  }
+
+  if(family==='GENERAL_PROCEDURE' && ['INVESTIGATION','PROSECUTION'].includes(proceduralStage)){
+    const criminalProcedure=/\b(?:pidana|kuhap|penyidikan|penuntutan|praperadilan|tersangka|terdakwa|penahanan|penangkapan|penyitaan|penggeledahan)\b/.test(`${hay} ${article}`);
+    if(!criminalProcedure) return {ok:false,reason:`authority general-procedure tidak mempunyai nexus acara pidana untuk tahap ${proceduralStage}`};
+  }
+
+  if(issueId==='remedy-procedure'){
+    const stage=proceduralStage;
+    if(family==='SUBSTANTIVE') return {ok:false,reason:'isu prosedural tidak boleh diikat ke authority substantif tanpa nexus hukum-acara yang nyata'};
+    if(!proceduralFamilyCompatible(stage,family)) return {ok:false,reason:`authority prosedural family=${family} tidak cocok dengan tahap perkara=${stage}`};
+    const candidateForum=inferCandidateForum(c);
+    if(caseForum!=='UNSPECIFIED' && candidateForum!=='UNSPECIFIED' && candidateForum!==caseForum){
+      return {ok:false,reason:`forum authority=${candidateForum} tidak cocok dengan forum perkara=${caseForum}`};
+    }
+  }
+
+  if(issueId==='civil-criminal-boundary'){
+    const boundary=/perdata.*pidana|pidana.*perdata|kualifikasi.*pidana|unsur pidana|wanprestasi.*pidana|pmh.*pidana/.test(`${hay} ${article}`);
+    if(!boundary && c.source_kind==='LOCAL') return {ok:false,reason:'isu batas perdata-pidana memerlukan authority/article yang secara nyata membahas boundary; authority satu-sisi saja tidak cukup'};
+  }
+
+  return {ok:true};
+}
+
 function bindIssuesToAuthorities(
   issues:any[],
   ontologyIssues:Array<{ question?:string; issue?:string; id:string; query_terms:string[]; domain:string }>,
@@ -1316,7 +1550,10 @@ function bindIssuesToAuthorities(
   caseDomainCtx:DomainRankingContext,
   caseText:string,
   caseRegime:DetectedRegime,
+  caseForum:DetectedForum='UNSPECIFIED',
+  proceduralStage?:AuthorityProceduralStage,
 ):any[] {
+  const resolvedProceduralStage=proceduralStage||resolveProceduralPosture({text:caseText}).stage;
   const ontologyByText = new Map<string,{ id:string; query_terms:string[]; domain:string }>();
   const ontologyById = new Map<string,{ id:string; query_terms:string[]; domain:string }>();
   for (const o of ontologyIssues) {
@@ -1362,10 +1599,27 @@ function bindIssuesToAuthorities(
         if (rej.length<24) rej.push({issue:meta.id,reason:`status authority tidak aktif: ${c.effective_status}`});
         continue;
       }
+      let bindingTempusStatus=c.tempus_status;
       if (c.tempus_status==='POTENTIALLY_INCOMPATIBLE') {
-        const rej=((c as any).__temporal_rejections ||= []);
-        if (rej.length<24) rej.push({issue:meta.id,reason:'authority terbit setelah tempus perkara'});
-        continue;
+        // Material-event tempus and procedural tempus are not interchangeable.
+        // A later procedural instrument is not automatically inapplicable merely
+        // because the underlying transaction/event occurred earlier. For a
+        // procedural issue, compare against the dated proceeding if available;
+        // otherwise keep applicability UNVERIFIED rather than falsely rejecting.
+        const proceduralCandidate=inferProceduralAuthorityFamily(c)!=='SUBSTANTIVE';
+        if(proceduralCandidate){
+          const proceduralYear=inferProceduralTempusYearFromCase(caseText,resolvedProceduralStage);
+          if(proceduralYear && c.year && c.year>proceduralYear){
+            const rej=((c as any).__temporal_rejections ||= []);
+            if (rej.length<24) rej.push({issue:meta.id,reason:`authority prosedural terbit setelah tempus proses=${proceduralYear}`});
+            continue;
+          }
+          bindingTempusStatus=proceduralYear&&c.year ? 'POTENTIALLY_COMPATIBLE' : 'UNVERIFIED';
+        } else {
+          const rej=((c as any).__temporal_rejections ||= []);
+          if (rej.length<24) rej.push({issue:meta.id,reason:'authority terbit setelah tempus material perkara'});
+          continue;
+        }
       }
 
       // GATE 1 — domain alignment.
@@ -1389,6 +1643,15 @@ function bindIssuesToAuthorities(
       if (!regimeCheck.compatible) {
         const rej=((c as any).__regime_rejections ||= []);
         if (rej.length<24) rej.push({ issue:meta.id, reason:regimeCheck.reason });
+        continue;
+      }
+
+      // GATE 2.5 — issue-family compatibility. A topical overlap is not enough
+      // when the issue itself asks a procedural or cross-regime question.
+      const issueCompat=issueAuthorityCompatible(meta.id,c,resolvedProceduralStage,caseForum);
+      if(!issueCompat.ok){
+        const rej=((c as any).__issue_family_rejections ||= []);
+        if(rej.length<24) rej.push({issue:meta.id,reason:issueCompat.reason});
         continue;
       }
 
@@ -1474,9 +1737,21 @@ function bindIssuesToAuthorities(
       // GATE 3A — independent issue support.
       // Candidate-level explicit citation is NOT a blanket issue override:
       // every bound issue still needs at least one issue-specific semantic match.
+      // IMPORTANT: retrieval/catalog keywords are intentionally excluded from
+      // titleHay/tagsHay/artHay below. They are diagnostics only, never evidence.
       if (!specificDistinct.length) {
+        const metadataHay=normalizeSearchToken((c.metadata_keywords||[]).join(' '));
+        const metadataOnlyHit=terms.some(t=>{
+          const n=normalizeSearchToken(t).trim();
+          return n.length>=4 && isIssueSpecificTerm(n) && containsNormalizedTerm(metadataHay,n);
+        });
         const rej=((c as any).__support_rejections ||= []);
-        if (rej.length<24) rej.push({ issue:meta.id, reason:'tidak ada kecocokan spesifik dengan isu' });
+        if (rej.length<24) rej.push({
+          issue:meta.id,
+          reason:metadataOnlyHit
+            ? 'hanya cocok pada metadata katalog/retrieval; tidak ada dukungan substansi authority'
+            : 'tidak ada kecocokan spesifik dengan isu',
+        });
         continue;
       }
 
@@ -1484,6 +1759,15 @@ function bindIssuesToAuthorities(
       // A broad multi-term issue may not bind from one incidental article-only word.
       // Preserve one-word article-only acceptance only when the ontology issue
       // itself contains exactly one specific query term.
+      //
+      // V7.0.2.10: the previous "strongUpstreamNexus" bypass for OFFICIAL
+      // candidates is removed. It was only ever safe to the extent GATE 3A's
+      // specificDistinct check was itself honest — and GATE 3A was, at the time,
+      // silently satisfied by the c.query self-reinforcement bug above. With that
+      // bug fixed, a bypass of this gate is no longer defensible: an official
+      // candidate now earns its bind the same way a local-corpus candidate does,
+      // on its own title/excerpt/tag content, with no shortcut tied to a score
+      // that was computed upstream (and is not this gate's job to re-trust).
       const issueSpecificQueryTerms=unique(
         terms.map(t=>normalizeSearchToken(t)).filter(t=>isIssueSpecificTerm(t))
       );
@@ -1520,6 +1804,43 @@ function bindIssuesToAuthorities(
 
       if (c.regime_note) binding_score -= 12;
       if (c.material_confidence==='LOW') binding_score -= 3;
+
+      // V7.0.2.9 — issue-scoped article precision.
+      // article_summary on a LOCAL candidate previously came from one case-wide
+      // article ranking computed against the union of every issue's terms, then
+      // reused verbatim wherever that regulation bound to ANY issue. A regulation
+      // can legitimately pass domain/title/tag binding for several issues that
+      // share vocabulary while only some of its articles actually answer any one
+      // issue's specific question — reusing the same "pasal relevan" list for
+      // both issues is exactly the identity-right-substance-unverified promotion
+      // this is meant to prevent. Re-rank this candidate's own articles against
+      // ONLY this issue's terms; if none score, the regulation still binds on its
+      // domain/title/tag nexus (already gated above) but must not claim a
+      // specific pasal it was never shown to answer this question — and is
+      // scored down accordingly so it cannot casually outrank a candidate that
+      // did produce an issue-specific match.
+      let issueArticleSummary=c.article_summary;
+      if (c.source_kind==='LOCAL' && Array.isArray(c.raw_articles) && c.raw_articles.length) {
+        const rankedForIssue=c.raw_articles
+          .map((a:any)=>({a,...scoreArticleMaterial(a,terms,issueDomainAnchors,caseText)}))
+          .filter((x:any)=>x.matched && x.score>0)
+          .sort((x:any,y:any)=>y.score-x.score);
+        if (rankedForIssue.length) {
+          issueArticleSummary=rankedForIssue.slice(0,4).map((x:any)=>safeString(x.a?.pasal)).filter(Boolean).join(', ');
+        } else {
+          issueArticleSummary='';
+          binding_score -= 4;
+        }
+      }
+
+      // Broad cross-cutting issues fail closed on LOCAL authorities unless an
+      // issue-specific article actually survived the per-issue article ranking.
+      if(c.source_kind==='LOCAL' && LOCAL_ISSUES_REQUIRING_ARTICLE_NEXUS.has(meta.id) && !issueArticleSummary){
+        const rej=((c as any).__article_nexus_rejections ||= []);
+        if(rej.length<24) rej.push({issue:meta.id,reason:'local authority rejected: no issue-specific article nexus'});
+        continue;
+      }
+
       if (binding_score < 6) continue;
 
       scored.push({
@@ -1527,14 +1848,14 @@ function bindIssuesToAuthorities(
         source_kind:c.source_kind,
         binding_score,
         matched_terms:specificDistinct.slice(0,6),
-        article_summary:c.article_summary,
+        article_summary:issueArticleSummary,
         material_confidence:c.material_confidence,
         regime_note:c.regime_note,
         domain_alignment:c.domain_alignment,
         authority_identity:c.authority_identity,
-        tempus_status:c.tempus_status,
+        tempus_status:bindingTempusStatus,
         effective_status:c.effective_status,
-        binding_reason:`issue=${meta.id}; matched=${specificDistinct.slice(0,4).join(', ')||'none'}; domain=${meta.domain||'unspecified'}; domain_hits=${issueDomainHits}; alignment=${c.domain_alignment}; tempus=${c.tempus_status}`,
+        binding_reason:`issue=${meta.id}; matched=${specificDistinct.slice(0,4).join(', ')||'none'}; domain=${meta.domain||'unspecified'}; domain_hits=${issueDomainHits}; alignment=${c.domain_alignment}; tempus=${bindingTempusStatus}`,
       });
     }
 
@@ -1568,7 +1889,7 @@ function bindIssuesToAuthorities(
         : t.material_confidence==='MEDIUM'
           ? 'tingkat keyakinan sedang'
           : 'tingkat keyakinan rendah';
-      const art=t.article_summary?` — pasal relevan: ${t.article_summary}`:'';
+      const art=t.article_summary?` — pasal relevan: ${t.article_summary}`:(t.source_kind==='LOCAL'?' — pasal spesifik untuk isu ini belum ditemukan; keterkaitan bersifat cakupan domain/topik, bukan pasal tertentu':'');
       const note=t.regime_note?` Catatan: ${t.regime_note}.`:'';
       return `${rank}: ${t.source_label}${art} (${source}, ${confidence}).${note}`;
     });
@@ -1584,15 +1905,33 @@ function bindIssuesToAuthorities(
 // Section III presentation filter (V6.7.2).
 // Retrieval pools and audit data remain intact. Only applicable_law presentation
 // is narrowed to authorities that actually bind to at least one issue.
+//
+// V7.0.2.9: matching used to compare normalizeSearchToken(regulation)/source text
+// against normalizeSearchToken(source_label) alone. For judicial authorities this
+// is fragile — the bound label is the full title, `source` on the applicable-law
+// side may be just a domain, and `regulation` may be a slightly differently
+// canonicalized title (aggregator vs direct-fetch phrasing, punctuation, etc.),
+// so an authority that legitimately bound to an issue could still fail to
+// reconcile here and silently vanish from Section III. Every candidate that
+// feeds the binding pool already carries a deterministic authority_identity key
+// (instrument_type:number:year, or a source_kind+label fallback) built by the
+// same authorityIdentityKey() used on both sides — match on that first, since it
+// does not depend on title text surviving two independent normalization passes
+// unchanged. Fall back to the legacy fuzzy label match only for entries that
+// carry no authority_identity (e.g. raw in-text citations extracted by
+// extractSourceLawCitations, which are not part of the binding pool at all).
 function filterApplicableLawToBoundAuthorities(
   items: ApplicableLaw[],
   boundLabels: Set<string>,
+  boundIdentities: Set<string> = new Set(),
 ): ApplicableLaw[] {
   if(!items.length) return items;
   // V6.8.3 — fail closed: when no authority survived issue binding, Section III
   // must not repopulate itself from the unbound retrieval pool.
-  if(!boundLabels.size) return [];
+  if(!boundLabels.size && !boundIdentities.size) return [];
   const filtered=items.filter(item=>{
+    const identity=safeString((item as any)?.authority_identity||'');
+    if(identity) return boundIdentities.has(identity);
     const identities=[
       normalizeSearchToken((item as any)?.regulation || ''),
       normalizeSearchToken((item as any)?.source || ''),
@@ -1602,6 +1941,41 @@ function filterApplicableLawToBoundAuthorities(
   // Fail closed on display reconciliation as well; diagnostics still retain
   // the full retrieval pool for audit without presenting it as applicable law.
   return filtered;
+}
+
+function enrichApplicableLawFromIssueBindings(items:ApplicableLaw[],issues:any[]):ApplicableLaw[]{
+  const byIdentity=new Map<string,{issueLabels:string[];articles:string[];matched:string[]}>();
+  for(const issue of issues||[]){
+    const issueLabel=safeString(issue?.issue);
+    for(const b of ((issue as any)?.bound_authorities||[])){
+      const id=safeString((b as any)?.authority_identity||'');
+      if(!id) continue;
+      const row=byIdentity.get(id)||{issueLabels:[],articles:[],matched:[]};
+      if(issueLabel && !row.issueLabels.includes(issueLabel)) row.issueLabels.push(issueLabel);
+      const art=safeString((b as any)?.article_summary||'');
+      if(art) for(const a of art.split(',').map(x=>x.trim()).filter(Boolean)) if(!row.articles.includes(a)) row.articles.push(a);
+      for(const m of ((b as any)?.matched_terms||[]).map((x:any)=>safeString(x)).filter(Boolean)) if(!row.matched.includes(m)) row.matched.push(m);
+      byIdentity.set(id,row);
+    }
+  }
+  return items.map(item=>{
+    const id=safeString((item as any)?.authority_identity||'');
+    const bind=byIdentity.get(id);
+    if(!bind) return item;
+    const issueText=bind.issueLabels.slice(0,2).map(x=>`“${x.slice(0,160)}${x.length>160?'…':''}”`).join(' | ');
+    const nexus=bind.matched.slice(0,6).join(', ');
+    const article=bind.articles.length?bind.articles.slice(0,6).join(', '):item.article;
+    const provenance=safeString(item.relevance)
+      .replace(/Keterkaitan material dengan isu telah lolos(?:\s+retrieval\s+gate)?\s*,?\s*(?:tetapi\s+)?/gi,'')
+      .replace(/Kandidat ditemukan melalui penelusuran\s+"[^"]*"\.?/gi,'')
+      .trim();
+    const relevance=[
+      issueText?`Terikat pada isu: ${issueText}.`:'',
+      nexus?`Nexus substansi yang terdeteksi: ${nexus}.`:'',
+      provenance,
+    ].filter(Boolean).join(' ');
+    return {...item,article,relevance};
+  });
 }
 
 export interface CasePipelineGate {
@@ -1701,6 +2075,11 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     tracer.fail('ingest', 'insufficient_readable_text');
     throw new Error('Materi perkara tidak cukup terbaca untuk dilakukan analisis.');
   }
+  const integrity = validateReasoningDocumentIntegrity({ inputType, text, ingestion:input.document_ingestion });
+  if (!integrity.ok) {
+    tracer.fail('ingest', `reasoning_input_integrity=${integrity.reasons.join(',')}`);
+    throw new Error(`Materi dokumen belum aman untuk penalaran otomatis (${integrity.reasons.join(', ')}). Pulihkan/ulang pembacaan dokumen sebelum membentuk analisis hukum.`);
+  }
 
   const charCount = text.length;
   tracer.end('ingest', `chars=${charCount}`);
@@ -1750,13 +2129,20 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     ),
   };
   tracer.end('evidence_model', `facts=${deterministicEvidence.textual_facts.length}; claims=${deterministicEvidence.party_claims.length}`);
+  const semanticIntegrity = validateSemanticModelIntegrity({ inputType, text, evidence:deterministicEvidence });
+  if (!semanticIntegrity.ok) {
+    tracer.fail('evidence_model', `semantic_integrity=${semanticIntegrity.reasons.join(',')}`);
+    throw new Error(`Dokumen terbaca tetapi pemetaan semantik tidak cukup untuk menghasilkan analisis hukum yang aman (${semanticIntegrity.reasons.join(', ')}). Hasil generik tidak akan dibentuk.`);
+  }
 
   tracer.begin('role_classify');
   const sourceRole = deterministicEvidence.source_role;
+  const proceduralPosture = resolveProceduralPosture({title,text,sourceRole});
   tracer.end('role_classify', `confidence=${Number(deterministicEvidence.source_role_confidence || 0).toFixed(2)}`);
 
   tracer.begin('fact_claim_split');
   tracer.end('fact_claim_split', `facts=${deterministicEvidence.textual_facts.length}; claims=${deterministicEvidence.party_claims.length}`);
+  reportCaseProgress(input, 70, 'EVIDENCE_MODEL', 'Fakta, klaim, aktor, dan bukti awal telah dipetakan.');
 
   const evidenceLedger = extractEvidenceLedger(text);
   const sourceLawCitations = extractSourceLawCitations(text);
@@ -1784,6 +2170,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     .filter((x:string) => /\b(?:uu|undang[- ]undang|pp|peraturan\s+pemerintah|perppu|perpres|peraturan\s+presiden|permen|peraturan\s+menteri)\b/i.test(x) && /\b(?:no\.?|nomor)\s*[0-9a-z./-]+\s+tahun\s+(?:19|20)\d{2}\b/i.test(x))
   ).slice(0, 6);
   tracer.end('query_build', `queries=${officialQueries.length}`);
+  reportCaseProgress(input, 76, 'LEGAL_QUERY_BUILD', 'Query hukum dan authority seed telah disusun.');
 
   tracer.begin('law_discover', `mode=${regulatoryMode}`);
   const officialLawRetrieval = await discoverOfficialLaw({
@@ -1797,6 +2184,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     manualAuthorities: input.manual_official_sources || [],
   });
   tracer.end('law_discover', `candidates=${officialLawRetrieval.candidates.length}`);
+  reportCaseProgress(input, 84, 'OFFICIAL_AUTHORITY_RETRIEVAL', `Penelusuran authority selesai: ${officialLawRetrieval.candidates.length} kandidat ditemukan.`);
 
   tracer.begin('identity_gate');
   const usableOfficialCandidates = officialLawRetrieval.candidates.filter((c:any)=>!officialCandidateRejected(c));
@@ -1810,6 +2198,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
 
   tracer.begin('local_corpus_route', `mode=${regulatoryMode}; local=${localCorpusCandidates.length}; online=${usableOfficialCandidates.length}`);
   tracer.end('local_corpus_route', `reasoning_candidates=${reasoningLawCandidates.length}`);
+  reportCaseProgress(input, 89, 'AUTHORITY_FILTERING', `Kandidat hukum tersaring: ${reasoningLawCandidates.length} bahan untuk penalaran.`);
 
   // Deterministic reasoning now follows the selected regulatory source route:
   // Local=Regulatory Corpus; Hybrid=Corpus+official online; Online=official online.
@@ -1823,6 +2212,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
   });
   const reasoningStatus: 'READY' | 'DEGRADED' = reasoning.reasoning_status;
   tracer.end('forensic_reason', `status=${reasoningStatus}; issues=${reasoning.legal_issues.length}`);
+  reportCaseProgress(input, 94, 'FORENSIC_REASONING', `Penalaran forensik selesai untuk ${reasoning.legal_issues.length} isu.`);
   const reasoningModel = 'lexicore-deterministic-forensic-v2';
   const reasoningAttempts = [{ model: reasoningModel, status: 'SUCCESS' as const, detail: reasoning.reasoning_reasons.length ? `reasons=${reasoning.reasoning_reasons.join('; ')}` : 'deterministic', duration_ms: Date.now() - started }];
 
@@ -1837,6 +2227,45 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
   const tactical_strategy = reasoning.tactical_strategy;
   const facts = reasoning.facts;
   const bindingPool:BindableCandidate[] = [
+    ...sourceLawCitations.map((c)=>{
+      // A citation the source document itself quotes as the charging/applicable
+      // article (e.g. "Pasal 603 Undang-Undang ... Nomor 1 Tahun 2023 tentang
+      // KUHP") was previously merged straight into applicable_law and then
+      // immediately stripped back out by filterApplicableLawToBoundAuthorities,
+      // because it never went through bindIssuesToAuthorities in the first
+      // place - it was included by name, not by binding. That meant an
+      // explicitly-charged statute could silently vanish from the final
+      // legal-framework table whenever it happened to differ from whatever
+      // the local corpus/online retrieval separately matched. Feeding it into
+      // the same binding pool as every other candidate lets it stand or fall
+      // on the same domain/family/regime materiality gates - it does not
+      // grant it a free pass, only a fair chance to be evaluated at all.
+      const hay=normalizeSearchToken(`${c.regulation||''} ${c.article_text_pool||''}`);
+      let primary=0, secondary=0, foreign=0;
+      for (const a of domainRankingContext.primary_anchors) if (a.length>=4 && hay.includes(a)) primary++;
+      for (const a of domainRankingContext.secondary_anchors) if (a.length>=4 && hay.includes(a)) secondary++;
+      for (const a of domainRankingContext.foreign_anchors) if (a.length>=4 && hay.includes(a)) foreign++;
+      const domain_alignment:'PRIMARY'|'SECONDARY'|'NEUTRAL'|'FOREIGN' =
+        primary>0 ? 'PRIMARY' : secondary>0 ? 'SECONDARY' : foreign>0 ? 'FOREIGN' : 'NEUTRAL';
+      return {
+        title:safeString(c.regulation),
+        source_kind:'LOCAL' as const,
+        source_label:safeString(c.regulation),
+        article_summary:safeString(c.article),
+        domain_tags:[] as string[],
+        article_text_pool:safeString(c.article_text_pool||''),
+        material_confidence:'MEDIUM' as const,
+        citation_hit:true,
+        regime_note:null,
+        domain_alignment,
+        instrument_type:c.instrument_type,
+        number:c.number,
+        year:c.year,
+        effective_status:'SOURCE_CITED_UNVERIFIED',
+        tempus_status:(tempusYear && c.year && Number(c.year) > tempusYear ? 'POTENTIALLY_INCOMPATIBLE' : tempusYear && c.year ? 'POTENTIALLY_COMPATIBLE' : 'UNVERIFIED') as 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE',
+        authority_identity:c.authority_identity||authorityIdentityKey({source_kind:'LOCAL',instrument_type:c.instrument_type,number:c.number,year:c.year,source_label:safeString(c.regulation)}),
+      };
+    }),
     ...matchedRegs.map((m:any)=>{
       const reg=m.regulation||{};
       const articles=(reg.articles||[]) as Array<{ pasal?:string; topic?:string; content?:string; keywords?:string[] }>;
@@ -1859,10 +2288,36 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
         effective_status:safeString(reg.status)||'LOCAL_CORPUS_STATUS_UNKNOWN',
         tempus_status:(tempusYear && Number(reg.tahun) > tempusYear ? 'POTENTIALLY_INCOMPATIBLE' : tempusYear && Number(reg.tahun) ? 'POTENTIALLY_COMPATIBLE' : 'UNVERIFIED') as 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE',
         authority_identity:authorityIdentityKey({source_kind:'LOCAL',instrument_type:safeString(reg.jenis),number:safeString(reg.nomor),year:Number(reg.tahun)||undefined,source_label:safeString(reg.nomor||reg.tentang)}),
+        raw_articles:articles.slice(0,40),
       };
     }),
     ...usableOfficialCandidates.map((c:any)=>{
-      const hay=normalizeSearchToken(`${c.title||''} ${c.excerpt||''} ${(c.domain_tags||[]).join(' ')}`);
+      // The discovery query that surfaced this candidate (judicial_product_queries /
+      // case_law_queries in officialLawRetriever.ts) is itself built from the
+      // V7.0.2.10 — self-reinforcement removed.
+      // A prior fix folded c.query (the search query used to FIND this candidate)
+      // into both domain_alignment and article_text_pool matching, reasoning that
+      // judicial candidates with generic titles (SEMA/PERMA) deserved a "fair
+      // shot." That was wrong: the query is evidence about what we searched for,
+      // not evidence about the document's own content. Because discovery queries
+      // are themselves built from the case's domain/issue terms, including them
+      // here meant GATE 3A ("at least one issue-specific term match") could be
+      // satisfied by the query matching itself — regardless of whether the
+      // candidate's actual title/excerpt says anything relevant. This let
+      // identity-correct-but-substantively-off-topic official regulations be
+      // promoted purely because they were surfaced by a well-targeted query.
+      // Binding now depends only on the candidate's own document-derived content:
+      // title, excerpt, domain_tags, and judicial/instrument metadata — never the
+      // query, and never a score that was itself computed partly from query text.
+      const officialContext=`${c.instrument_type||''} ${c.court||''}`;
+      const documentTags=Array.isArray(c.domain_tags)?c.domain_tags:[];
+      const metadataKeywords=Array.isArray(c.keywords)?c.keywords:[];
+      // Precision boundary (V7.0.2.19): only authority-owned/document-derived
+      // text may affect domain alignment and issue binding. Catalog keywords
+      // remain available for diagnostics but cannot promote an authority by
+      // themselves — see GATE 3A above and metadata_keywords below.
+      const documentEvidence=`${c.title||''} ${c.excerpt||''} ${officialContext} ${documentTags.join(' ')} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`;
+      const hay=normalizeSearchToken(documentEvidence);
       let primary=0, secondary=0, foreign=0;
       for (const a of domainRankingContext.primary_anchors) {
         if (a.length>=4 && hay.includes(a)) primary++;
@@ -1879,16 +2334,23 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
         secondary>0 ? 'SECONDARY' :
         foreign>0 ? 'FOREIGN' : 'NEUTRAL';
 
+      const officialBaseTier:'HIGH'|'MEDIUM' = c.material_nexus_status==='VERIFIED'?'HIGH':'MEDIUM';
+      const officialRegimeGuard = applyOfficialRegimeGuard(c, officialBaseTier, caseRegime);
+
       return {
         title:safeString(c.title),
         source_kind:'OFFICIAL' as const,
         source_label:safeString(c.title),
         article_summary:'',
-        domain_tags:Array.isArray(c.domain_tags)?c.domain_tags:[],
-        article_text_pool:safeString(c.excerpt||''),
-        material_confidence:(c.material_nexus_status==='VERIFIED'?'HIGH':'MEDIUM') as 'HIGH'|'MEDIUM',
+        domain_tags:documentTags,
+        // Deliberately exclude c.query, discovery_context, material_nexus_score,
+        // and catalog keywords. This pool is evidence, not retrieval provenance.
+        article_text_pool:safeString(`${c.excerpt||''} ${officialContext} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`),
+        metadata_keywords:metadataKeywords,
+        evidence_origin:(c.verification_state==='INDEXED_OFFICIAL'?'CATALOG_METADATA':'DOCUMENT_CONTENT') as 'DOCUMENT_CONTENT'|'CATALOG_METADATA',
+        material_confidence:officialRegimeGuard.tier,
         citation_hit:['EXACT_CITATION','USER_EXACT_CITATION'].includes(safeString(c.query_kind)),
-        regime_note:null,
+        regime_note:officialRegimeGuard.note,
         domain_alignment,
         instrument_type:safeString(c.instrument_type)||undefined,
         number:safeString(c.number)||undefined,
@@ -1896,6 +2358,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
         effective_status:safeString(c.effective_status)||undefined,
         tempus_status:(c.tempus_status||'UNVERIFIED') as 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE',
         authority_identity:authorityIdentityKey({source_kind:'OFFICIAL',instrument_type:safeString(c.instrument_type),number:safeString(c.number),year:Number(c.year)||undefined,source_label:safeString(c.title)}),
+        upstream_nexus_score:Number(c.material_nexus_score)||undefined,
       };
     }),
   ];
@@ -1913,13 +2376,18 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     domainRankingContext,
     text,
     caseRegime.regime,
+    caseRegime.forum,
+    proceduralPosture.stage,
   );
 
   const boundAuthorityLabels=new Set<string>();
+  const boundAuthorityIdentities=new Set<string>();
   for(const issue of legal_issues||[]){
     for(const b of ((issue as any)?.bound_authorities||[])){
       const label=normalizeSearchToken((b as any)?.source_label||'');
       if(label) boundAuthorityLabels.add(label);
+      const identity=safeString((b as any)?.authority_identity||'');
+      if(identity) boundAuthorityIdentities.add(identity);
     }
   }
 
@@ -1960,18 +2428,47 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
         ? m.matched_articles.map((a:any)=>safeString(a.pasal)).filter(Boolean).join(', ') || 'PERLU VERIFIKASI'
         : 'PERLU VERIFIKASI',
       relevance: relevanceLines.join(' '),
+      authority_identity: authorityIdentityKey({source_kind:'LOCAL',instrument_type:safeString(m.regulation.jenis),number:safeString(m.regulation.nomor),year:Number(m.regulation.tahun)||undefined,source_label:safeString(m.regulation.nomor||m.regulation.tentang)}),
     };
   });
 
   const dynamicOnlineLawCandidates: ApplicableLaw[] = usableOfficialCandidates
-    .filter((c:any) => c.status === 'IDENTITY_VERIFIED')
-    .map((c:any) => ({
-      domain: primaryDomain, source: c.source_domain || 'peraturan.bpk.go.id',
-      status: 'ONLINE_IDENTITY_VERIFIED_CANDIDATE',
-      regulation: safeString(c.title), article: 'PERLU VERIFIKASI',
-      relevance: `Identitas instrumen terbaca dari sumber resmi. Kandidat ditemukan melalui penelusuran "${safeString(c.query)}". Status berlaku: ${safeString(c.effective_status||'belum teridentifikasi')}. Kesesuaian waktu berlaku: ${safeString(c.tempus_status)}. Pasal spesifik dan keterkaitannya dengan fakta perkara masih wajib diverifikasi.`,
-      source_url: c.url, verification_status: c.status, tempus_status: c.tempus_status,
-    }));
+    // V7.0.2.8: local-first official index (OFFICIAL_INDEX / verification_state
+    // 'INDEXED_OFFICIAL') is the retrieval backbone, not a secondary path. Gating
+    // Section III solely on `status === 'IDENTITY_VERIFIED'` made that inclusion
+    // an accident of officialLawRetriever.ts currently hardcoding the same status
+    // string for both live-verified and index-backed candidates — a future change
+    // that made `status` more precise (e.g. distinguishing EXACT vs TOPICAL vs
+    // index-sourced) would silently drop the index backbone from the PDF with no
+    // error anywhere. Gate on verification_state explicitly instead, so index
+    // candidates are guaranteed to reach Section III on their own merit.
+    .filter((c:any) => c.status === 'IDENTITY_VERIFIED' || c.verification_state === 'INDEXED_OFFICIAL' || c.verification_state === 'VERIFIED_OFFICIAL')
+    .map((c:any) => {
+      const isDecision=safeString(c.authority_class)==='DECISION';
+      const isJudicial=safeString(c.authority_class)==='JUDICIAL_PRODUCT';
+      const isIndexBacked=c.verification_state==='INDEXED_OFFICIAL';
+      const authorityKind=isDecision
+        ? `Putusan${c.court?` ${safeString(c.court)}`:''}${c.decision_number?` Nomor ${safeString(c.decision_number)}`:''}`
+        : isJudicial
+          ? `${safeString(c.judicial_product_type||c.instrument_type||'Produk Yudisial')}${c.number?` Nomor ${safeString(c.number)}`:''}${c.year?` Tahun ${safeString(c.year)}`:''}`
+          : 'Instrumen hukum';
+      const statusText=isIndexBacked
+        ? 'Identitas terbaca dari indeks otoritas resmi lokal (snapshot katalog resmi); belum diverifikasi langsung pada sesi ini.'
+        : isDecision
+          ? 'Identitas putusan terbaca dari sumber resmi Direktori Putusan Mahkamah Agung.'
+          : isJudicial
+            ? 'Identitas produk yudisial terbaca dari sumber resmi JDIH Mahkamah Agung.'
+            : 'Identitas instrumen terbaca dari sumber resmi.';
+      return {
+        domain: primaryDomain, source: c.source_domain || 'sumber resmi',
+        status: isDecision?'ONLINE_JUDICIAL_DECISION_CANDIDATE':isJudicial?'ONLINE_JUDICIAL_PRODUCT_CANDIDATE':'ONLINE_IDENTITY_VERIFIED_CANDIDATE',
+        regulation: safeString(c.title||authorityKind), article: 'PERLU VERIFIKASI',
+        relevance: `${statusText} Kandidat ditemukan melalui penelusuran "${safeString(c.query)}". Kesesuaian waktu berlaku: ${safeString(c.tempus_status)}. Keterkaitan material dengan isu telah lolos retrieval gate, tetapi kaidah/holding, status, dan penerapan faktual tetap wajib diverifikasi profesional.`,
+        source_url: c.url, verification_status: c.verification_state || c.status, tempus_status: c.tempus_status,
+        authority_identity: authorityIdentityKey({source_kind:'OFFICIAL',instrument_type:safeString(c.instrument_type),number:safeString(c.number),year:Number(c.year)||undefined,source_label:safeString(c.title)}),
+        index_backed: isIndexBacked,
+      };
+    });
 
   let applicable_law: ApplicableLaw[] = [];
   const mergeLaw = (items: ApplicableLaw[]) => {
@@ -1989,7 +2486,8 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     if (!applicable_law.length) applicable_law = [{ domain: primaryDomain, source: 'Hybrid retrieval', status: 'NO_MATCH', regulation: 'Instrumen hukum spesifik belum teridentifikasi', article: 'PERLU VERIFIKASI', relevance: 'Mode Hybrid aktif, tetapi belum ada kandidat lokal maupun sumber resmi yang cukup kuat untuk ditampilkan sebagai dasar hukum.' }];
   }
 
-  applicable_law=filterApplicableLawToBoundAuthorities(applicable_law,boundAuthorityLabels);
+  applicable_law=filterApplicableLawToBoundAuthorities(applicable_law,boundAuthorityLabels,boundAuthorityIdentities);
+  applicable_law=enrichApplicableLawFromIssueBindings(applicable_law,legal_issues);
 
   tracer.begin('lawyer_workflow');
   const lawyer_workflow = buildLawyerWorkflow({
@@ -2000,12 +2498,24 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
   tracer.end('lawyer_workflow', `stages=${lawyer_workflow.stages.length}; matrix=${lawyer_workflow.allegation_response_matrix.length}`);
 
   tracer.begin('risk_score');
-  const risk_matrix: CaseRiskItem[] = reasoning.risks.map((r, i) => ({
-    clause: safeString(r.clause) || `Risiko ${i+1}`,
-    level: (['HIGH','MEDIUM','LOW'].includes(String(r.level).toUpperCase()) ? String(r.level).toUpperCase() : 'MEDIUM') as CaseRiskItem['level'],
-    finding: safeString(r.finding) || 'Risiko memerlukan verifikasi lebih lanjut.',
-    mitigation: safeString(r.mitigation) || 'Verifikasi fakta, bukti, norma, dan strategi sebelum tindakan final.',
-  }));
+  const boundAuthorityCount = new Set((legal_issues||[]).flatMap((issue:any)=>(issue?.bound_authorities||[]).map((b:any)=>safeString(b?.authority_identity||b?.source_label||'')).filter(Boolean))).size;
+  const risk_matrix: CaseRiskItem[] = reasoning.risks.map((r, i) => {
+    const clause=safeString(r.clause) || `Risiko ${i+1}`;
+    if(clause==='Hukum positif & tempus') return {
+      clause,
+      level:(boundAuthorityCount ? 'MEDIUM' : 'HIGH') as CaseRiskItem['level'],
+      finding:boundAuthorityCount
+        ? `${boundAuthorityCount} authority lolos binding issue → regime/forum/stage/tempus; pasal dan penerapan faktual tetap wajib diverifikasi profesional.`
+        : 'Belum ada authority yang lolos binding issue → regime/forum/stage/tempus untuk dijadikan rule final.',
+      mitigation:'Verifikasi pasal, perubahan/pencabutan, effective date, dan nexus faktual pada authority yang benar-benar lolos binding.',
+    };
+    return {
+      clause,
+      level: (['HIGH','MEDIUM','LOW'].includes(String(r.level).toUpperCase()) ? String(r.level).toUpperCase() : 'MEDIUM') as CaseRiskItem['level'],
+      finding: safeString(r.finding) || 'Risiko memerlukan verifikasi lebih lanjut.',
+      mitigation: safeString(r.mitigation) || 'Verifikasi fakta, bukti, norma, dan strategi sebelum tindakan final.',
+    };
+  });
   const computedRisk = risk_matrix.length ? Math.round(risk_matrix.reduce((n, r) => n + LEVEL_SCORE[r.level], 0) / risk_matrix.length) : 55;
   const aiRisk = Number(reasoning.overall_risk_score);
   const highStakesRolesForStrategicOutput=['DEFENSE_SUBMISSION_WITH_EXHIBITS','COMPLAINT_OR_PETITION','LITIGATION_SUBMISSION','INVESTIGATION_OR_BAP'];
@@ -2047,6 +2557,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
   ];
   const risks = risk_matrix.map(r => r.finding);
   tracer.end('risk_score', `risks=${risk_matrix.length}; overall=${overall_risk_score}`);
+  reportCaseProgress(input, 97, 'RISK_AND_STRATEGY', `Strategi kerja dan matriks risiko selesai; skor risiko ${overall_risk_score}.`);
 
   const summary = reasoning.summary;
   const recommendations = unique([...(reasoning.recommendations || []), ...(lawyer_workflow.next_actions || [])]).slice(0, 14);
@@ -2054,15 +2565,30 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
   // UI contract: keep Working Paper Action Plan aligned with VII. Rencana Tindakan.
   // Exporters use `recommendations`; the Working Paper tab reads `case_working_paper.action_plan`.
   // Build one canonical view from the same recommendation list so UI/PDF/DOCX do not diverge.
-  const action_plan = recommendations.map((action, i) => ({
-    step: i + 1,
-    priority: (`P${Math.min(3, Math.floor(i / 2) + 1)}`) as 'P1' | 'P2' | 'P3',
-    time_window: 'Belum ditetapkan',
-    action,
-    objective: 'Menutup celah pembuktian, verifikasi norma, atau langkah prosedural yang teridentifikasi.',
-    condition: 'Verifikasi bukti primer, otoritas hukum, tempus, dan posisi prosedural sebelum tindakan final.',
-    why_it_matters: 'Diselaraskan dengan VII. Rencana Tindakan pada working paper/export.',
-  }));
+  const action_plan = recommendations.map((action, i) => {
+    const a=safeString(action);
+    const objective=/citation|pasal|norma|authority|status\s+berlaku|tempus/i.test(a)
+      ? 'Memastikan dasar hukum yang benar-benar berlaku dan terikat pada isu material.'
+      : /saksi|ahli|pengetahuan\s+langsung/i.test(a)
+        ? 'Mengikat sumber keterangan pada proposisi, dokumen, dan unsur yang hendak dibuktikan.'
+        : /kredit|agunan|jaminan|rekening|pembayaran|taksasi|appraisal/i.test(a)
+          ? 'Merekonsiliasi hubungan keuangan/agunan dengan bukti primer dan kewenangan pelaku.'
+          : /dokumen|approval|persetujuan|sop|sk|integritas/i.test(a)
+            ? 'Memverifikasi integritas dokumen, urutan persetujuan, dan kewenangan yang relevan.'
+            : 'Menutup gap faktual/prosedural yang secara konkret teridentifikasi dalam working paper.';
+    const condition=/citation|pasal|norma|authority|tempus/i.test(a)
+      ? 'Gunakan hanya sumber resmi/primer dan cek versi yang berlaku pada tempus material.'
+      : /saksi|ahli/i.test(a)
+        ? 'Prioritaskan orang yang mempunyai pengetahuan langsung atau fungsi penyimpanan/verifikasi dokumen.'
+        : `Selaraskan dengan posture ${posture} dan bukti primer sebelum tindakan final.`;
+    return {
+      step: i + 1,
+      priority: (`P${Math.min(3, Math.floor(i / 2) + 1)}`) as 'P1' | 'P2' | 'P3',
+      time_window: i<2 ? 'Sebelum tindakan prosedural berikutnya' : 'Sebelum finalisasi pendapat/pleading',
+      action:a, objective, condition,
+      why_it_matters:`Relevan terhadap ${legal_issues.length} isu terpetakan dan posture ${posture}; hasilnya harus mengubah atau menguatkan matriks fakta-bukti/authority.`,
+    };
+  });
   const best_case = reasoning.best_case;
   const worst_case = reasoning.worst_case;
   const verification_note = reasoning.verification_note;
@@ -2126,7 +2652,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
 
   const reachableCount = usableOfficialCandidates.filter((x:any)=>x.status!=='UNREACHABLE').length;
   const identityCount = usableOfficialCandidates.filter((x:any)=>x.status==='IDENTITY_VERIFIED').length;
-  const providerStatus = officialLawRetrieval.providers?.[0]?.status || '';
+  const providerStatus = safeString((officialLawRetrieval.diagnostics as any)?.provider_status || officialLawRetrieval.providers?.find((p:any)=>p.status==='REACHABLE_CANDIDATES')?.status || officialLawRetrieval.providers?.[0]?.status || '');
   const providerSearchReachable = !['UNREACHABLE','DISABLED_LOCAL_MODE'].includes(providerStatus);
   const officialStatus = regulatoryMode === 'offline'
     ? 'ONLINE_DISABLED_LOCAL_MODE'
@@ -2253,6 +2779,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     documentIngestion: input.document_ingestion,
   });
   tracer.end('pipeline_gate', `status=${pipeline_gate.status}; score=${pipeline_gate.score}`);
+  reportCaseProgress(input, 99, 'FINALIZING_WORKING_PAPER', `Pipeline gate ${pipeline_gate.status}; menyusun working paper akhir.`);
 
   // V6.10.0 Group B corrective — canonical readiness contract.
   // Pipeline readiness answers only whether mandatory processing gates passed.
@@ -2301,6 +2828,14 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     ...(statement_buckets.party_claims || []).map((v:any)=>({ statement:v.statement, display_classification:'PLEADING_ASSERTION', evidence:v.evidence_tag, segment:v.page })),
   ].slice(0, 100);
 
+  const structuredEvidenceNeeded = unique([
+    ...legal_gaps.map((g:any)=>safeString(g?.gap)).filter(Boolean),
+    ...(lawyer_workflow.verification_queue||[]).map((x:any)=>safeString(x)).filter(Boolean),
+    ...(lawyer_workflow.financial_collateral_audit?.review_questions||[]).map((q:any)=>`Bukti primer untuk menjawab: ${safeString(q)}`).filter(Boolean),
+    ...(lawyer_workflow.document_integrity_audit?.document_markers||[]).slice(0,8).map((d:any)=>`Versi asli/terverifikasi dan metadata untuk dokumen: ${safeString(d)}`).filter(Boolean),
+    ...legal_issues.filter((x:any)=>!Array.isArray(x.bound_authorities)||x.bound_authorities.length===0).slice(0,6).map((x:any)=>`Authority resmi yang spesifik untuk isu: ${safeString(x.issue)}`),
+  ]).slice(0,18);
+
   tracer.begin('working_paper');
   const record: Omit<CaseAnalysisRecord,'id'|'created_at'> = {
     ...({ document_type: reasoning.document_type || primaryDomain } as any),
@@ -2309,11 +2844,8 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
     client_name: input.client_name ? String(input.client_name).trim() || undefined : undefined,
     incriminating_facts: [], mitigating_facts: [], legal_issues, applicable_law: applicable_law as any,
     summary, legal_analysis: legalAnalysisText, arguments_for, arguments_against,
-    evidence_needed: [
-      'Dokumen primer yang melahirkan hubungan hukum atau hak/kewajiban para pihak.',
-      'Bukti pembayaran/transaksi/korespondensi atau dokumen pelaksanaan yang relevan.',
-      'Kronologi bertanggal dan identitas/kapasitas hukum para pihak.',
-      'Bukti pendukung atas kerugian, pelanggaran, atau pembelaan yang didalilkan.',
+    evidence_needed: structuredEvidenceNeeded.length ? structuredEvidenceNeeded : [
+      'Dokumen primer yang secara langsung mendukung atau membantah isu material yang terpetakan.',
     ],
     evidentiary_gaps: legal_gaps.map(g => g.gap),
     risks, risk_matrix, overall_risk_score,
@@ -2333,6 +2865,7 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
       mode: 'DETERMINISTIC_FORENSIC_ENGINE',
       provider: 'LexiCore Local Kernel',
       model: reasoningModel,
+      contract_version: CASE_ANALYSIS_CONTRACT_VERSION,
       status: reasoningStatus,
       attempts: reasoningAttempts,
       timestamp: new Date().toISOString(),
@@ -2364,6 +2897,17 @@ export async function runCaseAnalysis(input: CaseAnalysisInput): Promise<CaseAna
 
   tracer.end('working_paper', `working_paper=${workingPaperReadinessScore}; pipeline=${pipelineGateReadinessScore}; analysis=${analysisReadinessScore}; gate=${pipeline_gate.status}`);
   (record as any).pipeline_trace = tracer.summarize();
+  return persistCaseAnalysisRecord(record, input.existing_case_id);
+}
+
+function persistCaseAnalysisRecord(
+  record: Omit<CaseAnalysisRecord,'id'|'created_at'>,
+  existingCaseId?: number,
+): CaseAnalysisRecord {
+  if (Number.isInteger(existingCaseId) && Number(existingCaseId) > 0) {
+    const updated = db.updateCaseAnalysis(Number(existingCaseId), record as Partial<CaseAnalysisRecord>);
+    if (updated) return updated;
+  }
   return db.saveCaseAnalysis(record);
 }
 
@@ -2377,10 +2921,23 @@ export const __test__ = {
   extractSourceLawCitations,
   bindIssuesToAuthorities,
   filterApplicableLawToBoundAuthorities,
+  enrichApplicableLawFromIssueBindings,
   detectCaseRegimeContext,
   reconcileLegalContextWithRegime,
   prioritizeIssuesForDomain,
   buildDomainRankingContext,
   matchRegulations,
   hasConsumerRelationshipEvidence,
+  applyRegimeGuard,
+  applyOfficialRegimeGuard,
+  inferredOfficialRegimeScope,
+  inferredOfficialJurisdictionForum,
+  inferredRegimeScope,
+  inferredJurisdictionForum,
+  detectAuthorityProceduralStage: (text:string,title='',sourceRole='')=>resolveProceduralPosture({title,text,sourceRole}).stage,
+  resolveProceduralPosture,
+  inferProceduralAuthorityFamily,
+  inferCandidateForum,
+  inferProceduralTempusYearFromCase,
+  persistCaseAnalysisRecord,
 };

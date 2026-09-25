@@ -104,6 +104,20 @@ function relevantLawsForIssue(seed:EvidenceIssueSeed,candidates:OfficialLawCandi
   return scored.slice(0,3).map(x=>x.c);
 }
 
+function statementHasIssueNexus(seed:EvidenceIssueSeed, statement:EvidenceStatement):boolean{
+  if(/^audit-|^open-world-|^adversarial-/i.test(String(seed.id||''))) return seed.pages.includes(statement.page);
+  if(!seed.pages.includes(statement.page)) return false;
+  const hay=clean(`${statement.statement} ${statement.quote}`).toLowerCase();
+  const direct=(seed.query_terms||[]).some(term=>{
+    const q=clean(term).toLowerCase();
+    return q.length>=5 && hay.includes(q);
+  });
+  if(direct) return true;
+  const issueTokens=tokenise(`${seed.issue} ${seed.basis}`).filter(t=>t.length>=6);
+  const hayTokens=new Set(tokenise(hay));
+  return issueTokens.some(t=>hayTokens.has(t));
+}
+
 function strengthenIssues(
   issues:EvidenceIssueSeed[],
   facts:EvidenceStatement[],
@@ -113,9 +127,9 @@ function strengthenIssues(
 ):ForensicReasoningOutput['legal_issues']{
   const out:ForensicReasoningOutput['legal_issues']=[];
   for(const seed of issues){
-    const fMatches=facts.filter(f=>seed.pages.includes(f.page)).slice(0,5);
-    const cMatches=claims.filter(c=>seed.pages.includes(c.page)).slice(0,5);
-    const sMatches=supporting.filter(c=>seed.pages.includes(c.page)).slice(0,3);
+    const fMatches=facts.filter(f=>statementHasIssueNexus(seed,f)).slice(0,5);
+    const cMatches=claims.filter(c=>statementHasIssueNexus(seed,c)).slice(0,5);
+    const sMatches=supporting.filter(c=>statementHasIssueNexus(seed,c)).slice(0,3);
     const laws=relevantLawsForIssue(seed,lawCandidates);
     const evidenceTags=[...fMatches.map(f=>tagFact(f.page,f.quote)),...sMatches.map(s=>tagSupport(s.page,s.quote)),...cMatches.map(c=>tagClaim(c.page,c.quote))];
     const supportCount=fMatches.length+sMatches.length;
@@ -159,9 +173,58 @@ function statementMentionsActor(statement:string,actor:{actor:string;aliases?:st
   });
 }
 
+// A long BAP/court-document sentence routinely names several different
+// people or entities in the same breath (e.g. "...diperiksa sebagai
+// Tersangka ... oleh Perumda BPR Kota Blitar kepada Debitur Dewi
+// Mufarida...", or a multi-point answer "a. ...calon debitur..., b. ...,
+// c. ...menyampaikan kepada saya selaku Direktur"). statementMentionsActor
+// only proves the actor's name is present somewhere in the statement, not
+// that the status/role word in that statement is actually asserting
+// something about that actor rather than about a different name mentioned
+// in an earlier or later clause of the same run-on statement. A fixed
+// character-distance window is not reliable here because BAP sentences
+// pack many comma/period-separated clauses into a short span; instead,
+// require the actor's own name and the status/role cue to fall in the
+// SAME clause (split on comma/period/semicolon/colon), so a cue that
+// belongs to a different clause is never borrowed.
+function statementAssertsActorStatus(statement:string,actor:{actor:string;aliases?:string[]}):boolean{
+  const hay=clean(statement);
+  const names=uniq([actor.actor,...(actor.aliases||[])]).map(clean).filter(Boolean);
+  if(!names.length) return false;
+  const keywordRe=/\b(?:hak|kewajiban|berwenang|kuasa|mewakili|selaku|sebagai)\b/gi;
+  // "kepada"/"oleh" mark the party that follows as a recipient or as a
+  // different acting party than the clause's own subject, not as the one
+  // bearing a status/role word stated earlier in the same clause - e.g.
+  // "...diperiksa sebagai Tersangka ... oleh Perumda BPR Kota Blitar
+  // kepada Debitur Dewi Mufarida..." names two different parties in one
+  // unpunctuated clause without either of them being "sebagai Tersangka".
+  // A clause split alone does not catch this because BAP sentences often
+  // run many words together with no internal comma/period at all.
+  const objectPrepositionRe=/\b(?:kepada|oleh)\b/i;
+  const clauses=hay.split(/[.,;:]/);
+  return clauses.some(clause=>{
+    keywordRe.lastIndex=0;
+    const keywordIndexes:number[]=[];
+    let km:RegExpExecArray|null;
+    while((km=keywordRe.exec(clause))) keywordIndexes.push(km.index);
+    if(!keywordIndexes.length) return false;
+    return names.some(name=>{
+      const pattern=escapeRegex(name).replace(/\\\s+/g,'\\s+');
+      const nameRe=new RegExp(`(^|[^A-Za-zÀ-ÿ0-9])${pattern}(?=$|[^A-Za-zÀ-ÿ0-9])`,'i');
+      const nameMatch=nameRe.exec(clause);
+      if(!nameMatch) return false;
+      const nameIndex=(nameMatch.index||0)+(nameMatch[1]?nameMatch[1].length:0);
+      return keywordIndexes.some(kwIndex=>{
+        const start=Math.min(kwIndex,nameIndex),end=Math.max(kwIndex,nameIndex);
+        return !objectPrepositionRe.test(clause.slice(start,end));
+      });
+    });
+  });
+}
+
 function actorStatus(evidence:EvidenceModel,actor:{actor:string;roles:string[];pages:number[];evidence_quotes:string[];aliases?:string[]}):string{
   const same=evidence.statements.filter(s=>actor.pages.includes(s.page)&&statementMentionsActor(s.statement,actor)).slice(0,3);
-  const explicit=same.find(s=>/\b(hak|kewajiban|berwenang|kuasa|mewakili|selaku|sebagai)\b/i.test(s.statement));
+  const explicit=same.find(s=>statementAssertsActorStatus(s.statement,actor));
   return explicit
     ? `Status/kapasitas yang tertulis perlu dibaca dari sumber: ${clip(explicit.statement,220)}`
     : 'Hak, kewajiban, kapasitas, dan kewenangan tidak diinferensikan otomatis; tetapkan hanya dari dokumen sumber dan norma yang telah diverifikasi.';
@@ -184,11 +247,13 @@ function buildLegalGaps(evidence:EvidenceModel,issues:ForensicReasoningOutput['l
 }
 
 function buildMultiPath(context:ReturnType<typeof inferLegalContext>,issues:ForensicReasoningOutput['legal_issues']):ForensicReasoningOutput['multi_path_diagnosis']{
-  const active=context.scores.filter(d=>d.score>=6).slice(0,4);
+  const active=[context.primary,...context.secondary].filter((d,i,arr)=>d.score>=6 && arr.findIndex(x=>x.id===d.id)===i).slice(0,4);
+  const primaryId=context.primary.id;
+  const primaryScore=Math.max(1,context.primary.score||1);
   const paths=active.map(d=>({
     path:d.label,
     legal_theory:'Jalur kualifikasi sementara. Substantive rule belum diasumsikan; gunakan hanya norma yang lolos retrieval dan verifikasi.',
-    strength:d.score>=18?'HIGH':d.score>=10?'MEDIUM':'LOW',
+    strength:d.id===primaryId ? (d.score>=18?'HIGH':d.score>=10?'MEDIUM':'LOW') : (d.score>=18 && d.score>=primaryScore*.75 ? 'MEDIUM' : 'LOW'),
     application:`Sinyal domain=${d.score}; isu material: ${issues.slice(0,4).map(i=>clip(i.issue,125)).join(' | ')||'belum cukup'}.`,
     counter_case:`Uji apakah fakta yang sama lebih tepat dikualifikasikan pada domain lain, atau apakah unsur domain ${d.label} tidak terbukti.`,
     evidence_needed:['Dokumen primer pembentuk hubungan hukum.','Kronologi bertanggal.','Bukti lawan/counter-evidence.','Norma resmi yang berlaku pada tempus.'],
@@ -200,7 +265,7 @@ function buildMultiPath(context:ReturnType<typeof inferLegalContext>,issues:Fore
 function buildIntegrationMatrix(evidence:EvidenceModel,primaryDomain:string):ForensicReasoningOutput['integration_matrix']{
   const rows:ForensicReasoningOutput['integration_matrix']=[];
   const materials=[...evidence.textual_facts,...evidence.party_claims].slice(0,16);
-  for(const actor of evidence.actors.slice(0,10)){
+  for(const actor of evidence.actors.filter(a=>roleActorIsMaterial(evidence,a)).slice(0,10)){
     const hit=materials.find(m=>actor.pages.includes(m.page)&&statementMentionsActor(m.statement,actor));
     if(!hit)continue;
     rows.push({actor:actor.actor,factual_act:clip(hit.statement,210),local_kb_nexus:`Gunakan corpus lokal hanya sebagai indeks kandidat untuk domain ${primaryDomain}; jangan promosikan sebagai authority tanpa verifikasi.`,online_law_nexus:'Cari sumber resmi berdasarkan isu material; wajib lolos identity, tempus, status, dan material nexus.',risk:hit.class==='PARTY_CLAIM'?'HIGH':'MEDIUM',evidence_tag:hit.class==='PARTY_CLAIM'?tagClaim(hit.page,hit.quote):tagFact(hit.page,hit.quote)});
@@ -244,6 +309,46 @@ function buildBlankSpots(evidence:EvidenceModel,issues:ForensicReasoningOutput['
   ]).slice(0,12);
 }
 
+function actorRoleKey(raw:string):string{
+  return clean(raw).toLowerCase().replace(/[^a-zà-ÿ0-9]+/g,' ').trim();
+}
+
+function roleActorIsMaterial(evidence:EvidenceModel,actor:any):boolean{
+  if(actor?.entity_type!=='ROLE')return true;
+  const role=actorRoleKey(actor?.actor||'');
+  const partyRole=/^(?:penggugat|tergugat|pemohon|termohon|pelapor|terlapor|tersangka|terdakwa|debitur|kreditur|penjual|pembeli|penyewa|pemberi sewa|pewaris|ahli waris)$/i;
+  if(!partyRole.test(role))return false;
+
+  // Canonical actor matrix represents concrete identities. Procedural/party
+  // roles are only a fallback when the source exposes no named person/entity
+  // at all; otherwise they belong in role/posture metadata, not as duplicate
+  // pseudo-actors beside named parties.
+  const hasNamedIdentity=evidence.actors.some((other:any)=>other!==actor && other?.entity_type!=='ROLE');
+  if(hasNamedIdentity)return false;
+
+  const coveredByNamed=evidence.actors.some((other:any)=>other!==actor && other?.entity_type!=='ROLE' &&
+    (other.roles||[]).some((r:string)=>actorRoleKey(r)===role) &&
+    (other.pages||[]).some((p:number)=>(actor.pages||[]).includes(p)));
+  if(coveredByNamed)return false;
+
+  // ROLE-only fallback is allowed only when the role is grammatically tied to a
+  // concrete material act. Merely appearing on the same page as an action is
+  // insufficient (rights advisories, SOP descriptions and hypothetical actors
+  // previously leaked as Terdakwa/Pemohon rows in production PDFs).
+  const active='(?:menjual|membeli|mengalihkan|menyerahkan|menerima|membayar|menandatangani|menggadaikan|menguasai|merusak|menghilangkan|menipu|mencairkan|meminjam|menyewa|mengajukan|menolak|membatalkan)';
+  const passive='(?:dijual|dibeli|dialihkan|diserahkan|diterima|dibayar|ditandatangani|digadaikan|dikuasai|dirusak|dihilangkan|ditipu|dicairkan|dipinjam|disewa|diajukan|ditolak|dibatalkan)';
+  const genericProcess=/\b(?:setiap|apabila|jika|calon|persyaratan|prosedur|pedoman|kebijakan|hak\s+untuk|berhak|dapat|boleh|wajib|permohonan\s+kredit|bagian\s+ao|account\s+officer|berkewarganegaraan|pendampingan\s+advokat)\b/i;
+  const escaped=role.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\s+/g,'\\s+');
+  const asSubject=new RegExp(`\\b${escaped}\\b[^.;]{0,70}\\b${active}\\b`,'i');
+  const asPassiveAgent=new RegExp(`\\b${passive}\\b[^.;]{0,50}\\boleh\\s+${escaped}\\b|\\b${passive}\\b[^.;]{0,50}\\boleh\\s+(?:para\\s+)?${escaped}\\b`,'i');
+  return evidence.statements.some((st:any)=>{
+    if(!(actor.pages||[]).includes(st.page))return false;
+    const text=String(st.statement||'');
+    if(genericProcess.test(text))return false;
+    return asSubject.test(text)||asPassiveAgent.test(text);
+  });
+}
+
 export function reasonForensically(input:ForensicReasoningInput):ForensicReasoningOutput{
   const {evidence,domainContext:context,primaryDomain,lawCandidates}=input;
   const facts=evidence.textual_facts,claims=evidence.party_claims,supporting=evidence.supporting_evidence||[],anomalies=evidence.anomalies;
@@ -253,7 +358,13 @@ export function reasonForensically(input:ForensicReasoningInput):ForensicReasoni
     anomalies:anomalies.slice(0,30).map(x=>({statement:x.statement,page:x.page,evidence_tag:tagAnomaly(x.page,x.quote)})),
     supporting_evidence:supporting.slice(0,160).map(x=>({statement:x.statement,page:x.page,evidence_tag:tagSupport(x.page,x.quote)})),
   };
-  const actor_matrix=evidence.actors.slice(0,50).map(a=>{
+  // Lawyer-facing actor matrix is identity-first. Generic ROLE nodes are
+  // evidence annotations, not parties, whenever at least one concrete PERSON/
+  // ORGANIZATION identity exists in the case. This final projection guard is
+  // deliberately stricter than extraction so advisory/SOP words such as
+  // "Terdakwa" or "Pemohon" cannot leak into PDF/DOCX beside named actors.
+  const hasConcreteActor=evidence.actors.some((a:any)=>a?.entity_type!=='ROLE');
+  const actor_matrix=evidence.actors.filter(a=>a.entity_type!=='ROLE' || (!hasConcreteActor && roleActorIsMaterial(evidence,a))).slice(0,50).map(a=>{
     const provenance=evidence.statements.find(s=>a.pages.includes(s.page) && statementMentionsActor(s.statement,a));
     const fallbackTag=evidence.source_role==='LEGAL_REFERENCE_MATERIAL'
       ? tagSupport
@@ -279,7 +390,7 @@ export function reasonForensically(input:ForensicReasoningInput):ForensicReasoni
   const adverse_evidence=buildAdverseEvidence(evidence);
   const risks=buildRisks(evidence,context,lawCandidates);
   const blank_spot_questions=buildBlankSpots(evidence,legal_issues,legal_gaps);
-  const applicable_law=lawCandidates.filter(usableLawCandidate).slice(0,12).map(c=>({regulation:c.title,article:'PERLU VERIFIKASI',relevance:`Provenance=${c.provider==='LOCAL_CORPUS'?'Regulatory Corpus':'official online'}; identity=${c.identity_match}; nexus=${c.material_nexus_status||'NOT_REQUIRED'}; status=${clean(c.effective_status||'belum terbaca')}; tempus=${c.tempus_status}.`,source_url:c.url,verification_status:c.status,tempus_status:c.tempus_status}));
+  const applicable_law=lawCandidates.filter(usableLawCandidate).slice(0,12).map(c=>({regulation:c.title,article:'PERLU VERIFIKASI',relevance:`Provenance=${c.provider==='LOCAL_CORPUS'?'Regulatory Corpus':c.provider==='OFFICIAL_INDEX'?'official catalog index':'official online'}; identity=${c.identity_match}; nexus=${c.material_nexus_status||'NOT_REQUIRED'}; status=${clean(c.effective_status||'belum terbaca')}; tempus=${c.tempus_status}.`,source_url:c.url,verification_status:c.status,tempus_status:c.tempus_status}));
   const arguments_for=legal_issues.filter(i=>!i.evidence_tags.some(t=>t.startsWith('[KLAIM KOSONG'))).slice(0,6).map(i=>`Jalur yang dapat dikembangkan bila bukti tetap konsisten: ${clip(i.issue,180)}`);
   const arguments_against=[...adverse_evidence.slice(0,4).map(a=>`Counter-case/anomali: ${clip(a.adverse_point,170)}`),...legal_issues.filter(i=>i.evidence_tags.some(t=>t.startsWith('[KLAIM KOSONG'))).slice(0,3).map(i=>`Kelemahan pembuktian: ${clip(i.issue,170)}`)];
   const weights={HIGH:85,MEDIUM:55,LOW:25} as const;
@@ -299,10 +410,10 @@ export function reasonForensically(input:ForensicReasoningInput):ForensicReasoni
   const reasoning_reasons:string[]=[];
   if(materialCount===0) reasoning_reasons.push('tidak ada materi substantif terklasifikasi');
   if(legal_issues.length===0) reasoning_reasons.push('issue graph kosong');
-  if(evidence.actors.length===0 && materialCount>2) reasoning_reasons.push('aktor belum teridentifikasi');
+  if(actor_matrix.length===0 && materialCount>2) reasoning_reasons.push('aktor belum teridentifikasi');
   const reasoning_status: 'READY'|'DEGRADED'=reasoning_reasons.length?'DEGRADED':'READY';
   const secondaryLabels=context.secondary.map(x=>x.label).filter(Boolean).slice(0,3);
-  const summary=`Analisis forensik deterministik atas "${input.title}". Primary domain=${primaryDomain}; secondary=${secondaryLabels.length?secondaryLabels.join(' | '):'tidak ada yang lolos ambang'}; confidence=${context.confidence}; source role=${evidence.source_role}. Materi terpetakan: ${facts.length} fakta tekstual, ${claims.length} klaim/dalil, ${supporting.length} bahan referensi/pendukung, ${anomalies.length} anomali, ${evidence.actors.length} aktor, ${verified_timeline.length} peristiwa bertanggal, ${legal_issues.length} isu. Tidak ada substantive rule yang dibuat tanpa provenance.`;
+  const summary=`Analisis forensik deterministik atas "${input.title}". Primary domain=${primaryDomain}; secondary=${secondaryLabels.length?secondaryLabels.join(' | '):'tidak ada yang lolos ambang'}; confidence=${context.confidence}; source role=${evidence.source_role}. Materi terpetakan: ${facts.length} fakta tekstual, ${claims.length} klaim/dalil, ${supporting.length} bahan referensi/pendukung, ${anomalies.length} anomali, ${actor_matrix.length} aktor canonical, ${verified_timeline.length} peristiwa bertanggal, ${legal_issues.length} isu. Tidak ada substantive rule yang dibuat tanpa provenance.`;
   return {
     document_type:evidence.source_role,summary,statement_buckets,actor_matrix,verified_timeline,facts:facts.slice(0,24).map(x=>x.statement),legal_issues,applicable_law,legal_gaps,multi_path_diagnosis,integration_matrix,adverse_evidence,arguments_for,arguments_against,risks,overall_risk_score,recommendations,tactical_strategy,blank_spot_questions,best_case,worst_case,verification_note:'VERIFIKASI PROFESIONAL PENDING. Reasoning core bersifat deterministik dan evidence-grounded. Dokumen asli, status norma, pasal, tempus, yurisdiksi, forum, tenggang, dan remedy harus diverifikasi sebelum tindakan hukum.',reasoning_status,reasoning_reasons,
   };

@@ -1,0 +1,72 @@
+--- a/server/localOcr.ts
++++ b/server/localOcr.ts
+@@ -72,23 +72,38 @@
+   return options;
+ }
+ 
+-async function createLocalWorker(onProgress?: (p: LocalOcrProgress) => void, page = 1, pages = 1) {
++async function createLocalWorker(
++  onProgress?: (p: LocalOcrProgress) => void,
++  page = 1,
++  pages = 1,
++  getActivePage?: () => number,
++) {
+   const { createWorker } = await import('tesseract.js');
+   const langs = String(process.env.OCR_LANGS || 'ind').trim() || 'ind';
+-  let lastReported = -1;
++  let lastReportedLocal = -1;
++  let lastReportedPage = -1;
+   return createWorker(langs, undefined, workerOptions((message: any) => {
+     if (message?.status !== 'recognizing text') return;
+-    const fraction = Number(message.progress || 0);
++    const activePage = clamp(Math.round(Number(getActivePage?.() || page || 1)), 1, Math.max(1, pages));
++    const fraction = clamp(Number(message.progress || 0), 0, 1);
+     const local = Math.round(fraction * 100);
+-    if (local < lastReported + 5 && local < 100) return;
+-    lastReported = local;
+-    const pageBase = 30 + ((page - 1) / Math.max(1, pages)) * 13;
++    // Reused Tesseract workers previously captured page=1 and therefore stopped
++    // producing meaningful progress for subsequent PDF pages. Reset the throttle
++    // whenever the active page changes and emit every 2% of OCR recognition.
++    if (activePage !== lastReportedPage) {
++      lastReportedPage = activePage;
++      lastReportedLocal = -1;
++    }
++    if (local < lastReportedLocal + 2 && local < 100) return;
++    lastReportedLocal = local;
++    const pageBase = 30 + ((activePage - 1) / Math.max(1, pages)) * 13;
+     const pageSpan = 13 / Math.max(1, pages);
++    const exactPercent = Math.min(43, pageBase + pageSpan * fraction);
+     onProgress?.({
+-      percent: Math.round(Math.min(43, pageBase + pageSpan * fraction)),
++      percent: Math.round(exactPercent * 10) / 10,
+       stage: 'OCR_PAGE',
+-      detail: `OCR lokal halaman ${page}/${pages} • ${local}%`,
+-      page,
++      detail: `OCR lokal halaman ${activePage}/${pages} • ${local}%`,
++      page: activePage,
+       pages
+     });
+   }) as any);
+@@ -206,16 +221,18 @@
+ 
+   try {
+     // Reuse one worker across all pages; this is substantially faster than loading language data per page.
+-    worker = await createLocalWorker(undefined, 1, pages);
++    let activeOcrPage = 1;
++    worker = await createLocalWorker(onProgress, 1, pages, () => activeOcrPage);
+     for (let i = 1; i <= pages; i++) {
+-      if (!worker) worker = await createLocalWorker(undefined, i, pages);
++      activeOcrPage = i;
++      if (!worker) worker = await createLocalWorker(onProgress, i, pages, () => activeOcrPage);
+       const page = await pdf.getPage(i);
+       const viewport = page.getViewport({ scale });
+       const factory = new NodeCanvasFactory();
+       const target = factory.create(viewport.width, viewport.height);
+ 
+       onProgress?.({
+-        percent: Math.round(30 + ((i - 1) / pages) * 13),
++        percent: Math.round((30 + ((i - 1) / pages) * 13) * 10) / 10,
+         stage: 'OCR_PAGE',
+         detail: `Merender dan membaca halaman ${i}/${pages} secara lokal.`,
+         page: i,

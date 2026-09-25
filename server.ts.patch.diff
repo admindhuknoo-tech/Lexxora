@@ -1,0 +1,18 @@
+--- a/server.ts
++++ b/server.ts
+@@ -1090,7 +1090,14 @@
+       document_ingestion: documentIngestion || undefined,
+       supplemental_narrative: supplementalNarrative || undefined,
+       client_id: req.body?.client_id ? String(req.body.client_id).trim() : undefined,
+-      client_name: req.body?.client_name ? String(req.body.client_name).trim() : undefined
++      client_name: req.body?.client_name ? String(req.body.client_name).trim() : undefined,
++      on_progress: ({ percent, stage, detail }) => {
++        progressMap.set(progressId, {
++          percent: Math.max(65, Math.min(99, Number(percent || 65))),
++          stage,
++          detail
++        });
++      }
+     });
+ 
+     progressMap.set(progressId, { percent: 100, stage: 'COMPLETE', detail: 'Working paper siap ditinjau.', case_id: result.id });

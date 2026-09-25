@@ -1,0 +1,30 @@
+LEXICORE V7.0.2.8 FINAL — INTERNAL TEST REPORT
+Date: 2026-09-18
+
+BASE TESTED
+- LEXY.zip original project
+- V7.0.2.7 official aggregator patch applied first
+- V7.0.2.8 local-first alternative applied on top
+
+ACTUAL TESTS RUN
+1. Full TypeScript project typecheck: PASS, 0 errors.
+2. Official authority index runtime test: 10/10 PASS.
+   - diversified catalog
+   - no case-party hardcode
+   - land doctrine lookup
+   - criminal case-law lookup
+   - consumer lookup
+   - banking/insolvency lookup
+   - tax lookup
+   - irrelevant-query fail-closed
+3. Production discoverOfficialLaw compiled and executed with deterministic HTTP 403 transport:
+   PASS — OFFICIAL_INDEX candidates remain available while JDIH_MA/PUTUSAN_MA are REACHABLE_BLOCKED.
+   PASS — global provider_status remains REACHABLE_CANDIDATES.
+   PASS — indexed SEMA 4/2016 is surfaced by general land-transfer query.
+4. performance-predeploy-v6122: 16/16 PASS.
+
+IMPORTANT HONESTY NOTE
+- No claim is made that live JDIH MA or Putusan MA direct Node fetch returns HTTP 200 in this environment.
+- V7.0.2.8 intentionally removes that condition as a hard dependency for judicial discovery.
+- Indexed authorities are marked INDEXED_OFFICIAL until live verification succeeds.
+- VERIFY_FINAL_V7028.bat still runs operational live-provider diagnostics; blocked judicial providers are reported as degraded enrichment, not hidden.

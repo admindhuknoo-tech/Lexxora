@@ -116,7 +116,7 @@ export const fixtures: CorpusFixture[] = [
       input_type: 'narrative+document',
       regulatory_mode: 'offline',
       document_ingestion: {
-        text: tanahSertifikatSengketa,
+        text: [1,2,4,5,6].map((page)=>`--- HALAMAN ${page} ---\n${tanahSertifikatSengketa}`).join('\n\n'),
         mode: 'LOCAL_OCR',
         pages_total: 6,
         pages_ocr: 5,

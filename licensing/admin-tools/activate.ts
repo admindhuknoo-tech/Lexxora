@@ -1,28 +1,32 @@
 // Admin CLI — Desktop offline activation.
 //
 // Flow this implements (the "Desktop" column of the roadmap):
-//   1. Customer installs LexiCore Desktop, app shows their Device ID.
-//   2. Customer sends the Device ID to the admin (WhatsApp/email/whatever).
-//   3. Admin runs this script with that Device ID -> gets an activation key.
-//   4. Admin sends the activation key back to the customer.
-//   5. Customer pastes it into the app -> app verifies + unlocks (offline,
-//      no server call needed at runtime).
+//   1. Customer installs LexiCore Desktop, app shows their Installation ID
+//      (in the "Aktivasi Offline" modal that's already built into the app).
+//   2. Customer sends the Installation ID to the admin (WhatsApp/email/whatever).
+//   3. Admin runs this script with that Installation ID -> gets a .lic.json file.
+//   4. Admin sends that file back to the customer as an attachment.
+//   5. Customer uploads it in the app's activation modal -> app verifies +
+//      unlocks (offline, no server call needed at runtime).
 //
 // Usage:
-//   npx tsx licensing/admin-tools/activate.ts commercial LXC7-8F2A-91BD-4C0E "PT Contoh Hukum"
-//   npx tsx licensing/admin-tools/activate.ts demo LXC7-8F2A-91BD-4C0E "Trial - Budi" 14
+//   npx tsx licensing/admin-tools/activate.ts commercial LXC7-8F2A-91BD-4C0E-77A1 "PT Contoh Hukum"
+//   npx tsx licensing/admin-tools/activate.ts demo LXC7-8F2A-91BD-4C0E-77A1 "Trial - Budi" 14
 //
 //   arg1: "commercial" | "demo"
-//   arg2: the customer's Device ID (exact string they sent you)
+//   arg2: the customer's Installation ID (exact string they sent you)
 //   arg3: customer/display name (for your own records, optional)
 //   arg4: demo length in days (only for "demo"; default 14)
 
 import fs from 'fs';
 import path from 'path';
-import { signPayload, encodeActivationKey, shortId } from '../core/crypto';
+import { fileURLToPath } from 'url';
+import { signPayload, shortId } from '../core/crypto';
 import type { DesktopLicensePayload } from '../core/types';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PRIVATE_KEY_PATH = path.join(__dirname, '.private-key.pem');
+const OUT_DIR = path.join(__dirname, 'issued-licenses');
 
 function loadPrivateKey(): string {
   if (!fs.existsSync(PRIVATE_KEY_PATH)) {
@@ -42,15 +46,17 @@ function main() {
   if (!mode || !deviceId || (mode !== 'commercial' && mode !== 'demo')) {
     console.error(
       'Usage:\n' +
-        '  activate.ts commercial <DEVICE_ID> [customerName]\n' +
-        '  activate.ts demo <DEVICE_ID> [customerName] [demoDays=14]\n'
+        '  activate.ts commercial <INSTALLATION_ID> [customerName]\n' +
+        '  activate.ts demo <INSTALLATION_ID> [customerName] [demoDays=14]\n'
     );
     process.exit(1);
   }
 
   const deviceIdNormalized = deviceId.trim().toUpperCase();
   if (!/^LXC7-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(deviceIdNormalized)) {
-    console.error(`Device ID doesn't look right: "${deviceIdNormalized}". Expected format LXC7-XXXX-XXXX-XXXX-XXXX.`);
+    console.error(
+      `Installation ID doesn't look right: "${deviceIdNormalized}". Expected format LXC7-XXXX-XXXX-XXXX-XXXX.`
+    );
     process.exit(1);
   }
 
@@ -72,13 +78,18 @@ function main() {
 
   const privateKeyPem = loadPrivateKey();
   const signature = signPayload(payload, privateKeyPem);
-  const key = encodeActivationKey(payload, signature);
+  const envelope = { payload, signature };
 
-  console.log('\n=== Activation key — send this back to the customer ===\n');
-  console.log(key);
-  console.log('\n=== Record (keep for your own admin log) ===\n');
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  const outFile = path.join(OUT_DIR, `${payload.licenseId}.lic.json`);
+  fs.writeFileSync(outFile, JSON.stringify(envelope, null, 2), 'utf8');
+
+  console.log(`\nLicense file written: ${outFile}`);
+  console.log('Send this file to the customer — they upload it in the "Aktivasi Offline" screen.\n');
+  console.log('Record (keep for your own admin log):');
   console.log(JSON.stringify(payload, null, 2));
   console.log('');
 }
 
 main();
+

@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && node scripts/precompress-static-v6122.mjs && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
+    "build": "vite build && node scripts/precompress-static-v6122.mjs && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && node scripts/build-runtime-commonjs.mjs",
+    "start": "node scripts/verify-runtime-parity.mjs && node dist/runtime/server.js",
     "lint": "tsc --noEmit",
     "audit:baseline": "node scripts/audit-baseline.mjs",
     "drafting:sources:sync": "node scripts/sync-official-drafting-sources.mjs",
@@ -23,7 +23,10 @@
     "audit:group-d": "node scripts/audit-v612-group-d-production-hardening.mjs",
     "smoke:production": "node scripts/smoke-production.mjs",
     "audit:consolidation": "node scripts/audit-v6121-canonical-consolidation.mjs",
-    "audit:performance": "node scripts/audit-v6122-performance-predeploy.mjs"
+    "audit:performance": "node scripts/audit-v6122-performance-predeploy.mjs",
+    "audit:v7-release": "node scripts/audit-v7-release.mjs",
+    "audit:production-path": "node scripts/audit-exact-runtime-entrypoints-v8.mjs",
+    "build:runtime": "node scripts/build-runtime-commonjs.mjs"
   },
   "dependencies": {
     "@types/multer": "^2.2.0",

@@ -1,0 +1,54 @@
+LexiCore V7.0.1 UI — Internal Test Report
+==========================================
+Scope: Theme integration (System/Light/Dark) + responsive regression check
+Date: 2026-09-18
+
+STATIC CHECKS
+- JavaScript syntax (node --check): PASS
+- HTML duplicate IDs: PASS
+- CSS parse lexicore.v6122.css: PASS (0 parse errors)
+- CSS parse lexicore.v7.ui.css: PASS (0 parse errors)
+- themeModeSelect unique: PASS
+
+RUNTIME CHECKS
+Engine: Chromium headless
+API: test-only mocked responses; production files unchanged
+
+Viewports tested:
+- 1366x768 desktop
+- 800x1100 portrait
+- 390x844 mobile
+- 844x390 tablet landscape
+
+For each viewport:
+- theme control present: PASS
+- System -> Light resolution (light OS preference): PASS
+- switch to Dark: PASS
+- dark design tokens applied: PASS
+- dark card surfaces applied: PASS
+- localStorage write for selected mode: PASS
+- switch back to Light: PASS
+- document horizontal overflow: PASS (none)
+- theme selector visible: PASS
+- keyboard focus ring on theme selector: PASS
+
+Responsive-specific checks:
+- Portrait workspace width >= 500px: PASS (636px at 800px viewport)
+- Mobile title width >= 300px: PASS (361px at 390px viewport)
+- Mobile stepper scrolls internally instead of clipping document: PASS
+- Mobile CTA is not fixed/sticky over form fields: PASS
+- System -> Dark resolution with dark OS preference: PASS
+
+REGRESSION FOUND DURING FIRST RUN
+- Portrait 721-1000px inherited legacy max-width:1000px !important rules.
+- Symptom: sidebar became fixed top rail; main workspace collapsed to ~155px.
+- Status: FIXED with explicit V7 portrait corrective architecture.
+- Rerun after fix: PASS.
+
+FINAL RESULT
+- Runtime failures after corrective rerun: 0
+- Package status: READY FOR USER-SIDE TEST
+
+Limitations:
+- Test environment does not use the real backend/Electron process; API responses are mocked only for UI rendering.
+- localStorage write was runtime-tested. Persistence across a real origin reload should be confirmed in the actual Electron/web runtime, where localStorage has a persistent origin.

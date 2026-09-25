@@ -17,7 +17,7 @@ const add=(name,ok)=>checks.push([name,Boolean(ok)]);
 // #1 Evidence Quality / Claim-to-Fact Integrity
 add('1.1 supporting evidence remains reference-tagged',/supporting_evidence:supporting[\s\S]{0,240}tagSupport\(/.test(reasoner));
 add('1.2 actor provenance resolves from evidence statement class',/tagForEvidenceStatement\(provenance\)/.test(reasoner));
-add('1.3 chronology heading is epistemically neutral',/Kronologi Terpetakan \(Fakta\/Klaim\)/.test(exporter) && !/Kronologi Terverifikasi/.test(exporter));
+add('1.3 chronology heading is epistemically neutral',/Kronologi Fakta dan Posisi Para Pihak/.test(exporter) && !/Kronologi Terverifikasi/.test(exporter));
 
 // #2 Actor Entity Resolution
 add('2.1 actor model exposes canonical entity metadata',/entity_type\?: 'PERSON'\|'ROLE'\|'ORGANIZATION'/.test(evidence) && /canonical_key\?: string/.test(evidence));
@@ -33,17 +33,19 @@ add('3.4 issue-domain anchors contribute to binding quality',/issueDomainAnchors
 
 // #4 Temporal Applicability
 add('4.1 candidate year after case tempus is incompatible',/candidateYear > tempusYear\) return 'POTENTIALLY_INCOMPATIBLE'/.test(retriever));
-add('4.2 temporal gate runs before semantic binding',/GATE 0\.5[\s\S]{0,900}POTENTIALLY_INCOMPATIBLE[\s\S]{0,500}GATE 1 — domain alignment/.test(caseAnalysis));
+const temporalGatePos=caseAnalysis.indexOf('GATE 0.5'); const temporalRejectPos=caseAnalysis.indexOf('POTENTIALLY_INCOMPATIBLE', temporalGatePos); const domainGatePos=caseAnalysis.indexOf('GATE 1 — domain alignment', temporalGatePos);
+add('4.2 temporal gate runs before semantic binding',temporalGatePos>=0 && temporalRejectPos>temporalGatePos && domainGatePos>temporalRejectPos);
 add('4.3 local and official binding candidates carry tempus status',/tempus_status:\(tempusYear && Number\(reg\.tahun\) > tempusYear/.test(caseAnalysis) && /tempus_status:\(c\.tempus_status\|\|'UNVERIFIED'\)/.test(caseAnalysis));
 add('4.4 temporal rejection is auditable',/temporal_rejections: bindingPool\.flatMap/.test(caseAnalysis));
 
 // Runtime actor-resolution smoke test through platform-neutral TypeScript transpile.
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'lexicora-group-a-'));
-for(const f of ['legalOntology.ts','evidenceModel.ts']){
+for(const f of ['proceduralPosture.ts','legalOntology.ts','evidenceModel.ts']){
   const src=fs.readFileSync(path.join('server',f),'utf8');
   const out=ts.transpileModule(src,{fileName:f,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
   fs.writeFileSync(path.join(tmp,f.replace(/\.ts$/,'.js')),out);
 }
+fs.copyFileSync(path.join('server','caseIntegrityPolicy.mjs'),path.join(tmp,'caseIntegrityPolicy.mjs'));
 const runtimeRequire=createRequire(path.join(tmp,'runner.cjs'));
 const { buildEvidenceModel }=runtimeRequire(path.join(tmp,'evidenceModel.js'));
 const model=buildEvidenceModel('Terdakwa Drs. Elya Dwi Admoko, M.M. hadir. Elya Dwi Admoko menandatangani surat. Sdri. Dewi Mufarida menyerahkan dokumen.');

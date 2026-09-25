@@ -1,0 +1,32 @@
+LEXICORE V7.0.2.6 INTERNAL TEST REPORT
+
+Test basis:
+- Original complete LEXY project source was used for integration compilation.
+- V7.0.2.4 provider-access changes and V7.0.2.5 compatibility correction were overlaid before V7.0.2.6.
+
+ACTUALLY EXECUTED:
+1. npm run lint / tsc --noEmit: PASS, 0 TypeScript errors.
+2. V7.0.2.6 fallback parser audit: 9/9 PASS.
+   - DDG classic markup
+   - DDG Lite redirect markup
+   - DDG changed/generic anchor markup
+   - Bing standard result markup
+   - foreign-domain rejection
+   - response-body diagnostics classifications
+   The TypeScript audit was compiled with TypeScript and executed as emitted JavaScript because the uploaded node_modules contains Windows esbuild and cannot run tsx natively in this Linux environment.
+3. V7.0.2.4 provider-access semantics regression: 11/11 PASS.
+   Executed from TypeScript-compiled JavaScript against mocked HTTP responses; only HTTP transport responses were mocked, production parsing/routing/probe logic was executed.
+4. V7.0.2.5 probe-contract compatibility: 12/12 PASS.
+5. performance-predeploy-v6122: 16/16 PASS.
+
+NOT CLAIMED:
+- Live JDIH MA / Putusan MA network retrieval from this environment is NOT claimed PASS.
+- The authoritative live result is the NO-MOCK Windows audit run by VERIFY_V7026.bat on the user's machine.
+
+Expected improved live diagnostics example when no fallback works:
+  fallback_attempted=yes strategy=EXHAUSTED hits=0
+  FALLBACK | DUCKDUCKGO_HTML | http=... | hits=0 | body=...
+  FALLBACK | DUCKDUCKGO_LITE | http=... | hits=0 | body=...
+  FALLBACK | BING | http=... | hits=0 | body=...
+
+A provider blocked on its direct search endpoint is considered usable only if fallback discovery finds an official-domain URL and the official detail page itself is fetched successfully.

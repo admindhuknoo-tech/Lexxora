@@ -21,8 +21,8 @@ const forbiddenPatterns = [
 check('1.1 officialLawRetriever.ts has no hardcoded regulation identity', !forbiddenPatterns.some(re => re.test(retrieverSrc)));
 check('1.2 caseAnalysis.ts has no hardcoded regulation identity', !forbiddenPatterns.some(re => re.test(caseSrc)));
 check('1.3 resolveCanonicalSeeds is present', /async function resolveCanonicalSeeds\s*\(/.test(retrieverSrc));
-check('1.4 extractCanonicalSeedsFromMatches is present', /function extractCanonicalSeedsFromMatches\s*\(/.test(caseSrc));
-check('1.5 canonicalSeeds is wired to discoverOfficialLaw', /discoverOfficialLaw\s*\(\s*\{[\s\S]{0,1400}?canonicalSeeds\s*,?[\s\S]{0,200}?\}\s*\)/.test(caseSrc));
+check('1.4 canonicalAuthoritySeeds bridge is present', /const\s+canonicalAuthoritySeeds\s*=/.test(caseSrc));
+check('1.5 canonicalAuthorities is wired to discoverOfficialLaw', /discoverOfficialLaw\s*\(\s*\{[\s\S]{0,1600}?canonicalAuthorities\s*:\s*canonicalAuthoritySeeds/.test(caseSrc));
 check('1.6 canonical merge priority is manual > seed > auto', /for\(const c of manual\.candidates\)[\s\S]{0,300}?for\(const c of seed\.candidates\)[\s\S]{0,300}?for\(const c of auto\.candidates\)/.test(retrieverSrc));
 check('1.7 canonical resolver is bounded to max 6', /CANONICAL_SEED_MAX\s*=\s*6/.test(retrieverSrc));
 check('1.8 canonical resolver has 45s budget', /CANONICAL_SEED_BUDGET_MS\s*=\s*45000/.test(retrieverSrc));
@@ -51,7 +51,7 @@ for (const s of ['Staatsblad 1847 No. 23','Kitab Undang-Undang Hukum Perdata','K
 
 check('3.1 V6.7.11 title-aware bonus is not present in production', !/titleCn\s*&&\s*titleCn\.includes\(a\)\s*\?\s*2\s*:\s*0/.test(retrieverSrc));
 check('3.2 V6.7.8 adaptive topical profile remains present', /function profileQueryForTopicalPolicy\s*\(/.test(retrieverSrc));
-check('3.3 network topical search cap remains 8', /input\.queries\.slice\(0,8\)/.test(retrieverSrc));
+check('3.3 provider-aware bounded network plan preserved', /buildAuthorityProviderPlan\s*\(/.test(retrieverSrc) && /regulationBudget=6/.test(retrieverSrc) && /judicialProductBudget=2/.test(retrieverSrc) && /caseLawBudget=2/.test(retrieverSrc));
 
 console.log(`\n${pass}/${pass + fail} canonical-seed-v680 checks PASS`);
 if (fail) process.exit(1);

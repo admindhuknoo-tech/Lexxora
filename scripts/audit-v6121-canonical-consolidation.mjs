@@ -13,7 +13,7 @@ const srv=read('server.ts');
 check('A evidence model present', ev.includes('buildEvidenceModel'));
 check('A forensic reasoner present', fw.includes('reason'));
 check('B canonical analysis readiness helper in exporter', exp.includes('function analysisReadinessScore'));
-check('B header/export status uses canonical analysis readiness', exp.includes('STATUS ANALISIS') && exp.includes('analysisReadinessScore(analysis)'));
+check('B header/export status uses canonical analysis readiness', exp.includes('Kesiapan Analisis') && exp.includes('analysisReadinessScore(analysis)') && !exp.includes('STATUS ANALISIS'));
 check('B pipeline gate remains a separate metric', exp.includes('pipelineGateLabel(analysis)'));
 check('B analysis readiness is min(pipeline, working paper)', ca.includes('Math.min(pipelineGateReadinessScore, workingPaperReadinessScore)'));
 check('B workflow posture implementation present', lw.includes('procedural'));

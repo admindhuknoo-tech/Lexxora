@@ -1,0 +1,3 @@
+Deterministic runtime probe: 8/8 PASS
+Scoped TypeScript compile: exit 0
+Full tsc --noEmit was executed in this runner and stopped on missing installed @types packages.

@@ -1,0 +1,58 @@
+LEXICORE V7.0.2.4 INTERNAL TEST REPORT
+
+Test basis:
+- Full LEXY baseline was extracted.
+- V7.0.2.3 patch was applied first.
+- V7.0.2.4 corrective was then applied to the integrated source.
+
+ACTUAL TESTS RUN
+1. TypeScript full project: node node_modules/typescript/bin/tsc --noEmit
+   RESULT: PASS (0 TypeScript errors)
+
+2. V7.0.2.4 provider-access semantics against production retriever with HTTP responses mocked only at transport boundary
+   RESULT: 11/11 PASS
+   Verified specifically:
+   - 403 and 429 are BLOCKED, not network failures.
+   - 503 is HTTP_ERROR.
+   - status 0 is NETWORK_ERROR.
+   - BPK 200 remains USABLE_DIRECT.
+   - JDIH MA direct 403 can become USABLE_VIA_FALLBACK only after an official JDIH MA detail page returns 200.
+   - Putusan MA direct 403 can become USABLE_VIA_FALLBACK only after an official Putusan MA detail page returns 200.
+   - search engine result is never treated as authority.
+
+3. V7.0.2.3 authority funnel regression on updated production retriever
+   RESULT: 24/24 PASS
+
+4. End-to-end Case Analysis pipeline on compiled production TypeScript
+   RESULT: 7/7 PASS
+   Judicial product and decision reached Section III / issue binding; professional-verification posture remained.
+
+5. query-scheduling-v679
+   RESULT: 13/13 PASS
+   Legacy cap assertion corrected to provider-aware <=10: regulation<=6, judicial product<=2, case law<=2.
+
+6. authority-query-v6710
+   RESULT: 17/17 PASS
+
+7. topical-policy-v678
+   RESULT: 17/17 PASS
+
+8. canonical-authority-contract-v681
+   RESULT: 19/19 PASS
+
+9. canonical-runtime-shape-v682
+   RESULT: 5/5 PASS
+
+10. performance-predeploy-v6122
+    RESULT: 16/16 PASS
+
+LIVE EXTERNAL TEST IN THIS CONTAINER
+- A no-mock live probe was attempted from the current execution environment.
+- It did not complete within the environment timeout, so no live PASS is claimed here.
+- The user's Windows run of V7.0.2.3 already established BPK=200 and MA providers=403. V7.0.2.4 changes that 403 interpretation to REACHABLE_BLOCKED and tests the full fallback->official-detail path.
+- Final live status must be determined by VERIFY_V7024.bat on the user's actual Windows environment.
+
+NO-FAKE-TEST STATEMENT
+- Mock transport was used only for deterministic regression of 403/fallback semantics; production parsing/routing/gating code was executed.
+- The live external probe is separately identified and is not replaced by the mock test.
+- No release-ready claim is made until the user's real live-provider path passes.

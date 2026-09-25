@@ -1,0 +1,23 @@
+--- /home/claude/lexy_v8/server/evidenceModel.ts	2026-09-21 13:04:50.000000000 +0000
++++ server/evidenceModel.ts	2026-09-21 22:37:51.370988513 +0000
+@@ -742,7 +742,19 @@
+       }
+     }
+     const prev1=i>0?lines[i-1]:'';
+-    return clean(`${prev1} ${line} ${next1}`);
++    // A neighbouring line in a dense multi-party header/signature block can
++    // carry its own unrelated identity/action cue (e.g. a different party's
++    // birth date, or a different actor's material act). Pulling that whole
++    // line into this date's context then lets classifyDateType misread this
++    // date as belonging to that neighbour's fact instead of its own. Only
++    // borrow a neighbour line when it does not itself carry a competing cue.
++    identityCue.lastIndex=0; const prevHasIdentity=prev1?identityCue.test(prev1):false;
++    identityCue.lastIndex=0; const nextHasIdentity=next1?identityCue.test(next1):false;
++    actionCue.lastIndex=0; const prevHasAction=prev1?actionCue.test(prev1):false;
++    actionCue.lastIndex=0; const nextHasAction=next1?actionCue.test(next1):false;
++    const safePrev=(prevHasIdentity||prevHasAction)?'':prev1;
++    const safeNext=(nextHasIdentity||nextHasAction)?'':next1;
++    return clean(`${safePrev} ${line} ${safeNext}`);
+   };
+ 
+   for(const p of rawPages(text)){

@@ -1,0 +1,298 @@
+--- server/caseAnalysis.ts
++++ server/caseAnalysis.ts
+@@ -25,7 +25,7 @@
+   client_name?: string;
+ }
+ 
+-type ApplicableLaw = { domain:string;source:string;status:string;regulation:string;article:string;relevance:string;source_url?:string;verification_status?:string;tempus_status?:string };
++type ApplicableLaw = { domain:string;source:string;status:string;regulation:string;article:string;relevance:string;source_url?:string;verification_status?:string;tempus_status?:string;authority_identity?:string;index_backed?:boolean };
+ type RegulatoryMode = 'offline' | 'hybrid' | 'online';
+ 
+ function normalizeRegulatoryMode(value: unknown): RegulatoryMode {
+@@ -1187,6 +1187,21 @@
+   year?: number;
+   effective_status?: string;
+   tempus_status: 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE';
++  // Pre-verified topical nexus score from officialLawRetriever.ts's own topical
++  // acceptance gate (SEMA/PERMA/Putusan candidates already passed this before
++  // being surfaced). Carried through so the independent issue-binding gate below
++  // treats it as corroborating evidence instead of silently discarding it.
++  upstream_nexus_score?: number;
++  // V7.0.2.19: retrieval/catalog metadata (e.g. OFFICIAL_INDEX entry.keywords),
++  // kept for diagnostics only. These MUST NOT satisfy issue-binding gates —
++  // a keyword tag is a categorization label assigned by whoever built the
++  // index, not textual evidence that the document itself discusses the issue.
++  metadata_keywords?: string[];
++  evidence_origin?: 'DOCUMENT_CONTENT' | 'CATALOG_METADATA';
++  // LOCAL-only: the regulation's raw article list, carried through so binding
++  // can re-rank articles per issue (see V7.0.2.9 article_summary precision fix
++  // below) instead of reusing one case-wide article ranking for every issue.
++  raw_articles?: Array<{ pasal?:string; topic?:string; content?:string; keywords?:string[] }>;
+ }
+ 
+ interface BoundAuthority {
+@@ -1474,9 +1489,21 @@
+       // GATE 3A — independent issue support.
+       // Candidate-level explicit citation is NOT a blanket issue override:
+       // every bound issue still needs at least one issue-specific semantic match.
++      // IMPORTANT: retrieval/catalog keywords are intentionally excluded from
++      // titleHay/tagsHay/artHay below. They are diagnostics only, never evidence.
+       if (!specificDistinct.length) {
++        const metadataHay=normalizeSearchToken((c.metadata_keywords||[]).join(' '));
++        const metadataOnlyHit=terms.some(t=>{
++          const n=normalizeSearchToken(t).trim();
++          return n.length>=4 && isIssueSpecificTerm(n) && containsNormalizedTerm(metadataHay,n);
++        });
+         const rej=((c as any).__support_rejections ||= []);
+-        if (rej.length<24) rej.push({ issue:meta.id, reason:'tidak ada kecocokan spesifik dengan isu' });
++        if (rej.length<24) rej.push({
++          issue:meta.id,
++          reason:metadataOnlyHit
++            ? 'hanya cocok pada metadata katalog/retrieval; tidak ada dukungan substansi authority'
++            : 'tidak ada kecocokan spesifik dengan isu',
++        });
+         continue;
+       }
+ 
+@@ -1484,6 +1511,15 @@
+       // A broad multi-term issue may not bind from one incidental article-only word.
+       // Preserve one-word article-only acceptance only when the ontology issue
+       // itself contains exactly one specific query term.
++      //
++      // V7.0.2.10: the previous "strongUpstreamNexus" bypass for OFFICIAL
++      // candidates is removed. It was only ever safe to the extent GATE 3A's
++      // specificDistinct check was itself honest — and GATE 3A was, at the time,
++      // silently satisfied by the c.query self-reinforcement bug above. With that
++      // bug fixed, a bypass of this gate is no longer defensible: an official
++      // candidate now earns its bind the same way a local-corpus candidate does,
++      // on its own title/excerpt/tag content, with no shortcut tied to a score
++      // that was computed upstream (and is not this gate's job to re-trust).
+       const issueSpecificQueryTerms=unique(
+         terms.map(t=>normalizeSearchToken(t)).filter(t=>isIssueSpecificTerm(t))
+       );
+@@ -1520,6 +1556,35 @@
+ 
+       if (c.regime_note) binding_score -= 12;
+       if (c.material_confidence==='LOW') binding_score -= 3;
++
++      // V7.0.2.9 — issue-scoped article precision.
++      // article_summary on a LOCAL candidate previously came from one case-wide
++      // article ranking computed against the union of every issue's terms, then
++      // reused verbatim wherever that regulation bound to ANY issue. A regulation
++      // can legitimately pass domain/title/tag binding for several issues that
++      // share vocabulary while only some of its articles actually answer any one
++      // issue's specific question — reusing the same "pasal relevan" list for
++      // both issues is exactly the identity-right-substance-unverified promotion
++      // this is meant to prevent. Re-rank this candidate's own articles against
++      // ONLY this issue's terms; if none score, the regulation still binds on its
++      // domain/title/tag nexus (already gated above) but must not claim a
++      // specific pasal it was never shown to answer this question — and is
++      // scored down accordingly so it cannot casually outrank a candidate that
++      // did produce an issue-specific match.
++      let issueArticleSummary=c.article_summary;
++      if (c.source_kind==='LOCAL' && Array.isArray(c.raw_articles) && c.raw_articles.length) {
++        const rankedForIssue=c.raw_articles
++          .map((a:any)=>({a,...scoreArticleMaterial(a,terms,issueDomainAnchors,caseText)}))
++          .filter((x:any)=>x.matched && x.score>0)
++          .sort((x:any,y:any)=>y.score-x.score);
++        if (rankedForIssue.length) {
++          issueArticleSummary=rankedForIssue.slice(0,4).map((x:any)=>safeString(x.a?.pasal)).filter(Boolean).join(', ');
++        } else {
++          issueArticleSummary='';
++          binding_score -= 4;
++        }
++      }
++
+       if (binding_score < 6) continue;
+ 
+       scored.push({
+@@ -1527,7 +1592,7 @@
+         source_kind:c.source_kind,
+         binding_score,
+         matched_terms:specificDistinct.slice(0,6),
+-        article_summary:c.article_summary,
++        article_summary:issueArticleSummary,
+         material_confidence:c.material_confidence,
+         regime_note:c.regime_note,
+         domain_alignment:c.domain_alignment,
+@@ -1568,7 +1633,7 @@
+         : t.material_confidence==='MEDIUM'
+           ? 'tingkat keyakinan sedang'
+           : 'tingkat keyakinan rendah';
+-      const art=t.article_summary?` — pasal relevan: ${t.article_summary}`:'';
++      const art=t.article_summary?` — pasal relevan: ${t.article_summary}`:(t.source_kind==='LOCAL'?' — pasal spesifik untuk isu ini belum ditemukan; keterkaitan bersifat cakupan domain/topik, bukan pasal tertentu':'');
+       const note=t.regime_note?` Catatan: ${t.regime_note}.`:'';
+       return `${rank}: ${t.source_label}${art} (${source}, ${confidence}).${note}`;
+     });
+@@ -1584,15 +1649,33 @@
+ // Section III presentation filter (V6.7.2).
+ // Retrieval pools and audit data remain intact. Only applicable_law presentation
+ // is narrowed to authorities that actually bind to at least one issue.
++//
++// V7.0.2.9: matching used to compare normalizeSearchToken(regulation)/source text
++// against normalizeSearchToken(source_label) alone. For judicial authorities this
++// is fragile — the bound label is the full title, `source` on the applicable-law
++// side may be just a domain, and `regulation` may be a slightly differently
++// canonicalized title (aggregator vs direct-fetch phrasing, punctuation, etc.),
++// so an authority that legitimately bound to an issue could still fail to
++// reconcile here and silently vanish from Section III. Every candidate that
++// feeds the binding pool already carries a deterministic authority_identity key
++// (instrument_type:number:year, or a source_kind+label fallback) built by the
++// same authorityIdentityKey() used on both sides — match on that first, since it
++// does not depend on title text surviving two independent normalization passes
++// unchanged. Fall back to the legacy fuzzy label match only for entries that
++// carry no authority_identity (e.g. raw in-text citations extracted by
++// extractSourceLawCitations, which are not part of the binding pool at all).
+ function filterApplicableLawToBoundAuthorities(
+   items: ApplicableLaw[],
+   boundLabels: Set<string>,
++  boundIdentities: Set<string> = new Set(),
+ ): ApplicableLaw[] {
+   if(!items.length) return items;
+   // V6.8.3 — fail closed: when no authority survived issue binding, Section III
+   // must not repopulate itself from the unbound retrieval pool.
+-  if(!boundLabels.size) return [];
++  if(!boundLabels.size && !boundIdentities.size) return [];
+   const filtered=items.filter(item=>{
++    const identity=safeString((item as any)?.authority_identity||'');
++    if(identity) return boundIdentities.has(identity);
+     const identities=[
+       normalizeSearchToken((item as any)?.regulation || ''),
+       normalizeSearchToken((item as any)?.source || ''),
+@@ -1859,10 +1942,36 @@
+         effective_status:safeString(reg.status)||'LOCAL_CORPUS_STATUS_UNKNOWN',
+         tempus_status:(tempusYear && Number(reg.tahun) > tempusYear ? 'POTENTIALLY_INCOMPATIBLE' : tempusYear && Number(reg.tahun) ? 'POTENTIALLY_COMPATIBLE' : 'UNVERIFIED') as 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE',
+         authority_identity:authorityIdentityKey({source_kind:'LOCAL',instrument_type:safeString(reg.jenis),number:safeString(reg.nomor),year:Number(reg.tahun)||undefined,source_label:safeString(reg.nomor||reg.tentang)}),
++        raw_articles:articles.slice(0,40),
+       };
+     }),
+     ...usableOfficialCandidates.map((c:any)=>{
+-      const hay=normalizeSearchToken(`${c.title||''} ${c.excerpt||''} ${(c.domain_tags||[]).join(' ')}`);
++      // The discovery query that surfaced this candidate (judicial_product_queries /
++      // case_law_queries in officialLawRetriever.ts) is itself built from the
++      // V7.0.2.10 — self-reinforcement removed.
++      // A prior fix folded c.query (the search query used to FIND this candidate)
++      // into both domain_alignment and article_text_pool matching, reasoning that
++      // judicial candidates with generic titles (SEMA/PERMA) deserved a "fair
++      // shot." That was wrong: the query is evidence about what we searched for,
++      // not evidence about the document's own content. Because discovery queries
++      // are themselves built from the case's domain/issue terms, including them
++      // here meant GATE 3A ("at least one issue-specific term match") could be
++      // satisfied by the query matching itself — regardless of whether the
++      // candidate's actual title/excerpt says anything relevant. This let
++      // identity-correct-but-substantively-off-topic official regulations be
++      // promoted purely because they were surfaced by a well-targeted query.
++      // Binding now depends only on the candidate's own document-derived content:
++      // title, excerpt, domain_tags, and judicial/instrument metadata — never the
++      // query, and never a score that was itself computed partly from query text.
++      const officialContext=`${c.instrument_type||''} ${c.court||''}`;
++      const documentTags=Array.isArray(c.domain_tags)?c.domain_tags:[];
++      const metadataKeywords=Array.isArray(c.keywords)?c.keywords:[];
++      // Precision boundary (V7.0.2.19): only authority-owned/document-derived
++      // text may affect domain alignment and issue binding. Catalog keywords
++      // remain available for diagnostics but cannot promote an authority by
++      // themselves — see GATE 3A above and metadata_keywords below.
++      const documentEvidence=`${c.title||''} ${c.excerpt||''} ${officialContext} ${documentTags.join(' ')} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`;
++      const hay=normalizeSearchToken(documentEvidence);
+       let primary=0, secondary=0, foreign=0;
+       for (const a of domainRankingContext.primary_anchors) {
+         if (a.length>=4 && hay.includes(a)) primary++;
+@@ -1884,8 +1993,12 @@
+         source_kind:'OFFICIAL' as const,
+         source_label:safeString(c.title),
+         article_summary:'',
+-        domain_tags:Array.isArray(c.domain_tags)?c.domain_tags:[],
+-        article_text_pool:safeString(`${c.discovery_context||''} ${c.excerpt||''} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`),
++        domain_tags:documentTags,
++        // Deliberately exclude c.query, discovery_context, material_nexus_score,
++        // and catalog keywords. This pool is evidence, not retrieval provenance.
++        article_text_pool:safeString(`${c.excerpt||''} ${officialContext} ${c.judicial_product_type||''} ${c.authority_class||''} ${c.decision_number||''}`),
++        metadata_keywords:metadataKeywords,
++        evidence_origin:(c.verification_state==='INDEXED_OFFICIAL'?'CATALOG_METADATA':'DOCUMENT_CONTENT') as 'DOCUMENT_CONTENT'|'CATALOG_METADATA',
+         material_confidence:(c.material_nexus_status==='VERIFIED'?'HIGH':'MEDIUM') as 'HIGH'|'MEDIUM',
+         citation_hit:['EXACT_CITATION','USER_EXACT_CITATION'].includes(safeString(c.query_kind)),
+         regime_note:null,
+@@ -1896,6 +2009,7 @@
+         effective_status:safeString(c.effective_status)||undefined,
+         tempus_status:(c.tempus_status||'UNVERIFIED') as 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE',
+         authority_identity:authorityIdentityKey({source_kind:'OFFICIAL',instrument_type:safeString(c.instrument_type),number:safeString(c.number),year:Number(c.year)||undefined,source_label:safeString(c.title)}),
++        upstream_nexus_score:Number(c.material_nexus_score)||undefined,
+       };
+     }),
+   ];
+@@ -1916,10 +2030,13 @@
+   );
+ 
+   const boundAuthorityLabels=new Set<string>();
++  const boundAuthorityIdentities=new Set<string>();
+   for(const issue of legal_issues||[]){
+     for(const b of ((issue as any)?.bound_authorities||[])){
+       const label=normalizeSearchToken((b as any)?.source_label||'');
+       if(label) boundAuthorityLabels.add(label);
++      const identity=safeString((b as any)?.authority_identity||'');
++      if(identity) boundAuthorityIdentities.add(identity);
+     }
+   }
+ 
+@@ -1960,30 +2077,45 @@
+         ? m.matched_articles.map((a:any)=>safeString(a.pasal)).filter(Boolean).join(', ') || 'PERLU VERIFIKASI'
+         : 'PERLU VERIFIKASI',
+       relevance: relevanceLines.join(' '),
++      authority_identity: authorityIdentityKey({source_kind:'LOCAL',instrument_type:safeString(m.regulation.jenis),number:safeString(m.regulation.nomor),year:Number(m.regulation.tahun)||undefined,source_label:safeString(m.regulation.nomor||m.regulation.tentang)}),
+     };
+   });
+ 
+   const dynamicOnlineLawCandidates: ApplicableLaw[] = usableOfficialCandidates
+-    .filter((c:any) => c.status === 'IDENTITY_VERIFIED')
++    // V7.0.2.8: local-first official index (OFFICIAL_INDEX / verification_state
++    // 'INDEXED_OFFICIAL') is the retrieval backbone, not a secondary path. Gating
++    // Section III solely on `status === 'IDENTITY_VERIFIED'` made that inclusion
++    // an accident of officialLawRetriever.ts currently hardcoding the same status
++    // string for both live-verified and index-backed candidates — a future change
++    // that made `status` more precise (e.g. distinguishing EXACT vs TOPICAL vs
++    // index-sourced) would silently drop the index backbone from the PDF with no
++    // error anywhere. Gate on verification_state explicitly instead, so index
++    // candidates are guaranteed to reach Section III on their own merit.
++    .filter((c:any) => c.status === 'IDENTITY_VERIFIED' || c.verification_state === 'INDEXED_OFFICIAL' || c.verification_state === 'VERIFIED_OFFICIAL')
+     .map((c:any) => {
+       const isDecision=safeString(c.authority_class)==='DECISION';
+       const isJudicial=safeString(c.authority_class)==='JUDICIAL_PRODUCT';
++      const isIndexBacked=c.verification_state==='INDEXED_OFFICIAL';
+       const authorityKind=isDecision
+         ? `Putusan${c.court?` ${safeString(c.court)}`:''}${c.decision_number?` Nomor ${safeString(c.decision_number)}`:''}`
+         : isJudicial
+           ? `${safeString(c.judicial_product_type||c.instrument_type||'Produk Yudisial')}${c.number?` Nomor ${safeString(c.number)}`:''}${c.year?` Tahun ${safeString(c.year)}`:''}`
+           : 'Instrumen hukum';
+-      const statusText=isDecision
+-        ? 'Identitas putusan terbaca dari sumber resmi Direktori Putusan Mahkamah Agung.'
+-        : isJudicial
+-          ? 'Identitas produk yudisial terbaca dari sumber resmi JDIH Mahkamah Agung.'
+-          : 'Identitas instrumen terbaca dari sumber resmi.';
++      const statusText=isIndexBacked
++        ? 'Identitas terbaca dari indeks otoritas resmi lokal (snapshot katalog resmi); belum diverifikasi langsung pada sesi ini.'
++        : isDecision
++          ? 'Identitas putusan terbaca dari sumber resmi Direktori Putusan Mahkamah Agung.'
++          : isJudicial
++            ? 'Identitas produk yudisial terbaca dari sumber resmi JDIH Mahkamah Agung.'
++            : 'Identitas instrumen terbaca dari sumber resmi.';
+       return {
+         domain: primaryDomain, source: c.source_domain || 'sumber resmi',
+         status: isDecision?'ONLINE_JUDICIAL_DECISION_CANDIDATE':isJudicial?'ONLINE_JUDICIAL_PRODUCT_CANDIDATE':'ONLINE_IDENTITY_VERIFIED_CANDIDATE',
+         regulation: safeString(c.title||authorityKind), article: 'PERLU VERIFIKASI',
+         relevance: `${statusText} Kandidat ditemukan melalui penelusuran "${safeString(c.query)}". Kesesuaian waktu berlaku: ${safeString(c.tempus_status)}. Keterkaitan material dengan isu telah lolos retrieval gate, tetapi kaidah/holding, status, dan penerapan faktual tetap wajib diverifikasi profesional.`,
+-        source_url: c.url, verification_status: c.status, tempus_status: c.tempus_status,
++        source_url: c.url, verification_status: c.verification_state || c.status, tempus_status: c.tempus_status,
++        authority_identity: authorityIdentityKey({source_kind:'OFFICIAL',instrument_type:safeString(c.instrument_type),number:safeString(c.number),year:Number(c.year)||undefined,source_label:safeString(c.title)}),
++        index_backed: isIndexBacked,
+       };
+     });
+ 
+@@ -2003,7 +2135,7 @@
+     if (!applicable_law.length) applicable_law = [{ domain: primaryDomain, source: 'Hybrid retrieval', status: 'NO_MATCH', regulation: 'Instrumen hukum spesifik belum teridentifikasi', article: 'PERLU VERIFIKASI', relevance: 'Mode Hybrid aktif, tetapi belum ada kandidat lokal maupun sumber resmi yang cukup kuat untuk ditampilkan sebagai dasar hukum.' }];
+   }
+ 
+-  applicable_law=filterApplicableLawToBoundAuthorities(applicable_law,boundAuthorityLabels);
++  applicable_law=filterApplicableLawToBoundAuthorities(applicable_law,boundAuthorityLabels,boundAuthorityIdentities);
+ 
+   tracer.begin('lawyer_workflow');
+   const lawyer_workflow = buildLawyerWorkflow({

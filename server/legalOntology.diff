@@ -1,0 +1,18 @@
+--- /home/claude/lexy_v8/server/legalOntology.ts	2026-09-21 07:39:37.000000000 +0000
++++ server/legalOntology.ts	2026-09-22 02:17:10.381181691 +0000
+@@ -246,7 +246,14 @@
+ 
+   if(id==='resignation-replacement') {
+     const transition=/\b(?:pengunduran\s+diri|mengundurkan\s+diri|diberhentikan|pemberhentian|penggantian|berhenti\s+dari\s+jabatan)\b/i.test(scoped);
+-    const office=/\b(?:jabatan|pengurus|pejabat|direktur|komisaris|ketua|sekretaris|bendahara|anggota)\b/i.test(scoped);
++    // The office/role a person held is typically established once, elsewhere
++    // in the document (e.g. an opening identification of the parties), and
++    // is not repeated on every page that later reports their resignation or
++    // replacement. Confirm office context against the whole document rather
++    // than only the page(s) where the resignation/replacement itself was
++    // mentioned, so a real cross-page fact is not dropped for lack of local
++    // repetition.
++    const office=/\b(?:jabatan|pengurus|pejabat|direktur|komisaris|ketua|sekretaris|bendahara|anggota)\b/i.test(all);
+     return transition && office;
+   }
+ 

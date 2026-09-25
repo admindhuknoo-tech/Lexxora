@@ -1,0 +1,95 @@
+LexiCore V7.0.1 — Navigation Completeness & Responsive QA
+==========================================================
+
+Scope
+-----
+Corrective for lifecycle menu #8 (Norm Conflict Analysis) on portrait/mobile,
+without regressing theme toggle, landscape desktop, portrait desktop, or global overflow.
+
+Implementation
+--------------
+1. 481–720 px portrait/mobile-wide:
+   - lifecycle navigation becomes an explicit 8-column grid;
+   - all 8 short labels are visible simultaneously;
+   - no hidden horizontal navigation extent.
+2. <=480 px compact mobile:
+   - navigation remains a horizontal scroll rail;
+   - continuation cue is visible on the right edge;
+   - activating/focusing a hidden module auto-scrolls it into view;
+   - reduced-motion preference is respected.
+3. Existing desktop/portrait sidebar and Light/Dark toggle are preserved.
+
+Static / Structural Tests
+-------------------------
+28/28 PASS
+- No duplicate HTML IDs.
+- Lifecycle nav order exactly: client, draft, review, case, corpus, risk, research, norm.
+- All 8 corresponding panel targets exist.
+- Norm Conflict short label exists.
+- Theme toggle remains unique.
+- V7 CSS parses with 0 errors and balanced braces.
+- 481–720 final rule uses repeat(8,minmax(0,1fr)).
+- <=480 final rule preserves scroll rail and continuation cue.
+- Geometry checked at 481, 520, 609, 640, 720 px.
+- JS active/focus visibility synchronization wired.
+- Theme runtime storage/toggle preserved.
+
+Navigation Logic Tests
+----------------------
+6/6 PASS
+- 390 px hidden menu auto-scrolls.
+- 390 px visible menu does not move unnecessarily.
+- 480 px hidden menu auto-scrolls.
+- 481 px uses fixed 8-grid (no compact auto-scroll).
+- 609 px uses fixed 8-grid.
+- prefers-reduced-motion uses non-animated scroll.
+
+Playwright / Chromium Runtime Tests
+-----------------------------------
+27/27 PASS
+Viewports tested:
+- 609 x 844 (portrait/mobile-wide)
+- 390 x 844 (compact mobile)
+- 800 x 1100 (portrait desktop/tablet)
+- 1366 x 768 (desktop landscape)
+
+Runtime assertions included:
+- Exactly 8 lifecycle menu items rendered.
+- Norm Conflict exists in every viewport.
+- No global horizontal document overflow.
+- At 609 px all 8 nav items are simultaneously fully visible.
+- At 609 px nav scrollWidth == clientWidth (no hidden item).
+- At 390 px nav is genuinely scrollable.
+- Clicking Norm Conflict at 390 px auto-scrolls it fully into view.
+- Norm Conflict receives active class and aria-current="page".
+- At 800 px portrait desktop keeps vertical sidebar navigation.
+- All portrait nav items have real non-zero layout boxes.
+- Theme toggle exists and switches Light/Dark in every tested viewport.
+
+Observed Runtime Geometry — 609 x 844
+-------------------------------------
+Nav clientWidth: 608 px
+Nav scrollWidth: 608 px
+Item 1: x 6–77
+Item 2: x 81–152
+Item 3: x 156–227
+Item 4: x 231–302
+Item 5: x 306–377
+Item 6: x 381–452
+Item 7: x 456–527
+Item 8: x 531–602 (Norm Conflict) — FULLY VISIBLE
+
+Observed Runtime — 390 x 844
+----------------------------
+Nav clientWidth: 389 px
+Nav scrollWidth: 728 px
+After selecting Norm Conflict:
+scrollLeft: 339 px
+Norm fully visible: true
+active: true
+aria-current: page
+
+Result
+------
+PASS — navigation completeness corrective validated across static, logic,
+and actual Chromium layout/runtime tests.

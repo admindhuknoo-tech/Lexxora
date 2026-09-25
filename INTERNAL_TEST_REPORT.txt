@@ -1,0 +1,41 @@
+LEXICORE V7.0.2.2 - INTERNAL TEST REPORT
+=======================================
+Test basis:
+- Original full LEXY.zip
+- User-supplied pre-patch server.rar / scripts.rar
+- V7.0.2.1 corrective integrated at correct project-root paths
+
+Pre-patch provenance validation:
+- server.rar: 19/19 files present in original LEXY.zip matched by file size + CRC32.
+- scripts.rar: 66 matching files matched by file size + CRC32; 4 extra desktop/release files were not part of the original LEXY.zip and are unrelated to this retrieval recovery.
+
+Integrated tests actually executed:
+PASS - npm run lint / tsc --noEmit
+PASS - V7.0.2 judicial-authority retrieval: 21/21
+PASS - query scheduling: 13/13
+PASS - authority query: 17/17
+PASS - query decomposition: 12/12
+PASS - topical policy: 17/17
+PASS - canonical authority v680b: 16/16
+PASS - canonical authority seed v6712: 16/16
+PASS - canonical authority contract: 19/19
+PASS - canonical runtime shape: 5/5
+PASS - issue binding: 8/8
+PASS - performance predeploy: 16/16
+
+Runtime execution note:
+- The source archive contains Windows node_modules. In the Linux audit environment, project-local tsx/esbuild cannot execute because @esbuild/win32-x64 is installed.
+- Runtime TypeScript audits were therefore executed with the environment's Linux-native global ts-node loader against the SAME integrated source files. They were not replaced with static grep tests.
+- `npm run lint` itself executed successfully against the integrated project tree.
+
+LIVE external provider test actually executed:
+FAIL/UNVERIFIED - JDIH_BPK: EAI_AGAIN DNS
+FAIL/UNVERIFIED - JDIH_MA: EAI_AGAIN DNS
+FAIL/UNVERIFIED - PUTUSAN_MA: EAI_AGAIN DNS
+0/3 live checks PASS in this environment.
+No mock was substituted for the live test.
+
+Conclusion:
+- Integration/package-path root cause corrected.
+- Static + deterministic runtime regression gates PASS on integrated source.
+- Live external connectivity remains environment-dependent and MUST be rerun on the user's Windows machine with VERIFY_V7022.bat.

@@ -1,0 +1,126 @@
+--- a/server/legalOntology.ts
++++ b/server/legalOntology.ts
+@@ -48,7 +48,7 @@
+     [
+       { id:'inheritance-entitlement', question:'Siapa subjek yang berkedudukan sebagai ahli waris, rezim waris apa yang berlaku, dan bagaimana bagian masing-masing termasuk bagian mutlak bila relevan?', basis:'Terdapat kematian/pewarisan, hubungan keluarga, atau pertanyaan mengenai bagian ahli waris.', signals:[/\bwaris\b|ahli\s+waris|pewaris|legitime\s+portie|bagian\s+mutlak|meninggal|wafat/i], query_terms:['waris','ahli waris','bagian mutlak','legitime portie'] },
+       { id:'marital-property-estate', question:'Objek mana yang merupakan harta bawaan, harta bersama, atau boedel waris, dan kapan serta dari sumber apa objek tersebut diperoleh?', basis:'Status harta harus dipisahkan sebelum menentukan bagian waris atau hak pasangan.', signals:[/harta\s+bawaan|harta\s+bersama|gono[\s-]?gini|perkawinan|menikah|sebelum\s+menikah|selama\s+perkawinan/i], query_terms:['harta bawaan','harta bersama','boedel waris','perkawinan'] },
+-      { id:'estate-asset-protection', question:'Tindakan perlindungan apa yang diperlukan terhadap objek atau dokumen boedel, termasuk pencegahan pengalihan, pemblokiran bila relevan, dan pemulihan/penggantian dokumen?', basis:'Terdapat risiko penguasaan, pengalihan, kerusakan, kehilangan, atau pemusnahan dokumen/objek waris.', signals:[/menguasai|dikuasai|dialihkan|dijual|sertifikat|dokumen|dirusak|dirobek|hilang|dibakar|direndam/i], query_terms:['pewarisan','perlindungan boedel','sertifikat pengganti','dokumen rusak'] },
++      { id:'estate-asset-protection', question:'Tindakan perlindungan apa yang diperlukan terhadap objek atau dokumen boedel, termasuk pencegahan pengalihan, pemblokiran bila relevan, dan pemulihan/penggantian dokumen?', basis:'Terdapat risiko penguasaan, pengalihan, kerusakan, kehilangan, atau pemusnahan dokumen/objek waris.', signals:[/menguasai|dikuasai|dialihkan|mengalihkan|dijual|menjual|dijaminkan|diagunkan|dibebani|hak\s+tanggungan|blokir|pemblokiran|sita|dirusak|dirobek|hilang|dibakar|direndam/i], query_terms:['pewarisan','perlindungan boedel','sertifikat pengganti','dokumen rusak'] },
+       { id:'civil-criminal-response', question:'Apakah tindakan penguasaan atau perusakan menimbulkan konsekuensi perdata, pidana, atau keduanya, dan unsur/bukti apa yang diperlukan untuk tiap jalur?', basis:'Terdapat tindakan terhadap barang/dokumen atau penguasaan yang berpotensi melanggar hak pihak lain.', signals:[/merusak|dirobek|menghancurkan|menghilangkan|menguasai|melawan\s+hukum|pidana|lapor/i], query_terms:['perbuatan melawan hukum','perusakan barang','penguasaan tanpa hak'] },
+     ],
+     ['waris','ahli waris','pewaris','legitime portie','bagian mutlak','harta bawaan','harta bersama','boedel','pewarisan'],
+@@ -70,7 +70,7 @@
+       { id:'cancellation-restitution', question:'Apakah pembatalan/pengakhiran disepakati atau dibenarkan, dan apa akibat restitusi/pengembalian prestasi yang telah diterima masing-masing pihak?', basis:'Terdapat pembatalan/pengakhiran, pengembalian pembayaran, atau permintaan pemulihan prestasi.', signals:[/pembatalan|membatalkan|dibatalkan|pengakhiran|mengakhiri|kembali\s+uang|pengembalian\s+uang|refund|restitusi/i], query_terms:['pembatalan perjanjian','pengembalian prestasi','restitusi'] },
+       { id:'default-remedies', question:'Apakah kewajiban telah dapat ditagih dan terjadi wanprestasi, termasuk syarat lalai/somasi, kausalitas, kerugian, dan remedy?', basis:'Terdapat indikasi prestasi tidak dipenuhi atau terlambat.', signals:[/wanprestasi|ingkar\s+janji|somasi|jatuh\s+tempo|tidak\s+memenuhi|tidak\s+kunjung|ganti\s+rugi|menghindar/i], query_terms:['wanprestasi','somasi','ganti rugi'] },
+       { id:'competing-disposition', question:'Apakah objek atau hak yang sebelumnya dijanjikan/ditransaksikan kemudian dialihkan atau ditawarkan kepada pihak ketiga, dan apa akibatnya terhadap kewajiban serta perlindungan pihak yang lebih dahulu bertransaksi?', basis:'Terdapat indikasi pengalihan, penjualan ulang, atau transaksi dengan pihak ketiga atas objek yang sama.', signals:[/pihak\s+ketiga|menjual\s+kembali|dijual\s+kembali|akan\s+dijual|mengalihkan|dialihkan|objek\s+yang\s+sama/i], query_terms:['pengalihan kepada pihak ketiga','jual beli objek yang sama','perlindungan pihak bertransaksi'] },
+-      { id:'tort-alternative', question:'Apakah terdapat dasar perbuatan melawan hukum yang berdiri sendiri atau hanya duplikasi dari wanprestasi?', basis:'Terdapat tindakan di luar pelaksanaan kontrak yang berpotensi melanggar hak.', signals:[/perbuatan\s+melawan\s+hukum|\bpmh\b|melawan\s+hukum/i], query_terms:['perbuatan melawan hukum','ganti rugi'] },
++      { id:'tort-alternative', question:'Apakah terdapat dasar perbuatan melawan hukum, unsur perbuatan-kesalahan-kerugian-kausalitas apa yang harus dibuktikan, dan bagaimana hubungan kontraktual—jika memang ada—mempengaruhi kualifikasinya?', basis:'Terdapat dalil perbuatan melawan hukum atau tindakan yang didalilkan melanggar hak di luar/di samping kewajiban kontraktual.', signals:[/perbuatan\s+melawan\s+hukum|\bpmh\b|melawan\s+hukum/i], query_terms:['perbuatan melawan hukum','kausalitas'] },
+     ],
+     ['wanprestasi','perjanjian','perikatan','hukum perdata','kuhperdata','ganti rugi','ingkar janji','somasi']),
+   profile('PIDANA_MATERIIL_FORMIL','Hukum Pidana & Acara Pidana',
+@@ -109,7 +109,7 @@
+ export const CROSS_CUTTING_ISSUES: LegalIssueTemplate[] = [
+   { id:'capacity-authority', question:'Apakah setiap aktor mempunyai kapasitas, kewenangan, atau dasar representasi untuk melakukan tindakan yang dipersoalkan?', basis:'Kapasitas dan kewenangan subjek dapat menentukan sah/tidaknya tindakan dan siapa yang dapat dimintai pertanggungjawaban.', signals:[/kuasa|mewakili|wali|direktur|pengurus|pejabat|atas\s+nama|kewenangan|berwenang/i], query_terms:['kapasitas hukum','kewenangan','perwakilan'] },
+   { id:'civil-criminal-boundary', question:'Jika fakta menunjukkan kerugian, penguasaan, penipuan, penggelapan, perusakan, atau pelanggaran kewajiban, apakah persoalan berada pada jalur perdata, pidana, atau keduanya, dan unsur apa yang membedakannya?', basis:'Terdapat tindakan yang dapat memiliki lebih dari satu kualifikasi hukum sehingga jalur tidak boleh dipilih hanya dari label pihak.', signals:[/ditipu|penipuan|penggelapan|merusak|menghilangkan|menguasai\s+tanpa|menggadaikan|digadaikan|mengalihkan\s+tanpa|melawan\s+hukum|wanprestasi|ingkar\s+janji/i], query_terms:['kualifikasi perdata pidana','unsur perbuatan','pembuktian'] },
+-  { id:'remedy-procedure', question:'Remedy dan langkah prosedural apa yang secara faktual dibutuhkan untuk melindungi posisi klien, dengan forum, tenggang, kewenangan, dan syarat formil yang masih harus diverifikasi?', basis:'Setiap analisis lawyer perlu memisahkan issue spotting dari pemilihan remedy dan prosedur yang benar.', signals:[/upaya\s+hukum|somasi|gugatan|permohonan|lapor|pembatalan|pengembalian|ganti\s+rugi|blokir|sita|banding|kasasi/i], query_terms:['remedy hukum','prosedur','tenggang','forum'] },
++  { id:'remedy-procedure', question:'Remedy dan langkah prosedural apa yang secara faktual dibutuhkan untuk melindungi posisi klien, dengan forum, tenggang, kewenangan, dan syarat formil yang masih harus diverifikasi?', basis:'Setiap analisis lawyer perlu memisahkan issue spotting dari pemilihan remedy dan prosedur yang benar.', signals:[/upaya\s+hukum|somasi|gugatan|permohonan|lapor|pembatalan|pengembalian|ganti\s+rugi|blokir|sita|banding|kasasi/i], query_terms:['hukum acara','tenggang upaya hukum','kompetensi pengadilan'] },
+   { id:'formal-status', question:'Apakah status formal, jabatan, dan kepengurusan yang dipersoalkan sah menurut anggaran dasar/anggaran rumah tangga dan peraturan yang berlaku pada tempus tersebut?', basis:'Dokumen menyebut jabatan/status kepengurusan formal yang dapat mempengaruhi kewenangan dan tanggung jawab subjek.', signals:[/kepengurusan|pengurus|jabatan|wakil\s+ketua|ketua|sekretaris|bendahara|direktur|komisaris|status\s+formal/i], query_terms:['kepengurusan','jabatan','anggaran dasar','status formal'] },
+   { id:'resignation-replacement', question:'Apakah pengunduran diri, pemberhentian, atau penggantian pejabat/pengurus memenuhi prosedur, kewenangan, dan tempus yang berlaku?', basis:'Dokumen menyebut pengunduran diri, pemberhentian, atau penggantian pejabat/pengurus.', signals:[/pengunduran\s+diri|mengundurkan\s+diri|diberhentikan|pemberhentian|penggantian|berhenti\s+dari\s+jabatan/i], query_terms:['pengunduran diri','pemberhentian','prosedur penggantian'] },
+   { id:'instrument-revision', question:'Apakah perubahan, revisi, atau pencabutan instrumen formal (SK, surat, keputusan) memiliki dasar kewenangan, prosedur, dan tempus yang sah sehingga dapat mengikat pihak yang bersangkutan?', basis:'Terdapat revisi/perubahan instrumen formal yang dapat mempengaruhi hak dan status hukum para pihak.', signals:[/sk\s+(awal|revisi)|surat\s+keputusan\s+(awal|revisi)|mencantumkan\s+nama|tidak\s+mencantumkan\s+nama|surat\s+revisi|perubahan\s+sk|revisi\s+sk|pencabutan\s+sk/i], query_terms:['perubahan surat keputusan','keabsahan revisi','kewenangan'] },
+@@ -147,6 +147,58 @@
+   return Math.round(weight * saturated + (head ? Math.min(3,weight*.25) : 0));
+ }
+ 
++
++// V7.0.2.21 — issue materiality guard. Regex hits are candidate discovery only;
++// promotion into the issue set requires context showing that the legal question
++// is actually disputed/material, not merely present as pleading boilerplate.
++function issueMaterialitySatisfied(id:string, text:string, matchedPageTexts:string[]):boolean {
++  const all=String(text||'');
++  const scoped=(matchedPageTexts.length?matchedPageTexts:[all]).join(' ');
++
++  if(id==='cancellation-restitution') {
++    const cancellation=/\b(?:pembatalan|membatalkan|dibatalkan|pengakhiran|mengakhiri|restitusi|refund|pengembalian\s+(?:uang|pembayaran|prestasi))\b/i.test(scoped);
++    const contractContext=/\b(?:perjanjian|kontrak|prestasi|pembayaran|uang\s+muka|\bdp\b|termin|jual\s+beli|utang|piutang|debitur|kreditur|wanprestasi)\b/i.test(scoped);
++    const certificateOnly=/\b(?:membatalkan|pembatalan)\s+(?:sertifikat|sertipikat|shm|hak\s+atas\s+tanah)\b/i.test(scoped) && !contractContext;
++    return cancellation && contractContext && !certificateOnly;
++  }
++
++  if(id==='power-of-attorney') {
++    const poa=/surat\s+kuasa|pemberi\s+kuasa|penerima\s+kuasa|memberikan\s+kuasa\s+kepada/i.test(scoped);
++    const disputed=/tidak\s+sah|cacat(?:\s+formil)?|melampaui\s+(?:batas\s+)?kuasa|tanpa\s+kuasa|keabsahan\s+(?:formil\s+)?(?:surat\s+)?kuasa|kuasa[^.;]{0,100}(?:dipersoalkan|dibantah|ditolak)|tidak\s+berwenang/i.test(scoped);
++    return poa && disputed;
++  }
++
++  if(id==='capacity-authority') {
++    // Boilerplate "untuk dan atas nama" or party/counsel labels alone are not
++    // enough. There must be a real authority/capacity controversy.
++    return /tidak\s+berwenang|berwenang\s+atau\s+tidak|kewenangan|tanpa\s+(?:izin|persetujuan|hak)|melampaui\s+kewenangan|tidak\s+berhak|kapasitas\s+hukum|kewenangan\s+mengalihkan/i.test(scoped);
++  }
++
++  if(id==='document-authenticity') {
++    const document=/\b(?:akta|sertifikat|sertipikat|kwitansi|tanda\s+terima|bukti\s+pembayaran|dokumen|surat\s+pernyataan)\b/i.test(scoped);
++    const integrity=/pemalsuan|palsu|dipalsukan|keaslian|tidak\s+benar|data\s+yang\s+tidak\s+benar|diubah|perubahan\s+setelah|backdating|tanggal[^.;]{0,80}(?:salah|berbeda|tidak\s+sesuai)/i.test(scoped);
++    return document && integrity;
++  }
++
++  if(id==='formal-status') {
++    return /kepengurusan|pengurus|direktur|komisaris|jabatan[^.;]{0,80}(?:sah|tidak\s+sah|dipersoalkan|diberhentikan)|anggaran\s+dasar|anggaran\s+rumah\s+tangga|\bAD\/ART\b/i.test(scoped);
++  }
++
++  if(id==='remedy-procedure') {
++    // A pleading naturally contains words such as "gugatan" and "permohonan".
++    // Those labels alone must not manufacture a standalone procedural issue.
++    return /upaya\s+hukum|somasi|banding|kasasi|peninjauan\s+kembali|\bverzet\b|sita|blokir|eksekusi|tenggang|daluwarsa|kompetensi|kewenangan\s+mengadili|forum\s+yang\s+berwenang|tidak\s+dapat\s+diterima|cacat\s+formil|syarat\s+formil|prosedur\s+yang\s+(?:salah|dilanggar|dipersoalkan)/i.test(scoped);
++  }
++
++  if(id==='estate-asset-protection') {
++    // Mere mention of a certificate/document is not an asset-protection issue.
++    // Require a concrete risk to possession, transfer, encumbrance, loss or damage.
++    return /menguasai|dikuasai|dialihkan|mengalihkan|dijual|menjual|dijaminkan|diagunkan|dibebani|hak\s+tanggungan|blokir|pemblokiran|sita|dirusak|dirobek|menghancurkan|hilang|dibakar|direndam/i.test(scoped);
++  }
++
++  return true;
++}
++
+ export function inferLegalContext(text: string) {
+   const scores = LEGAL_DOMAIN_PROFILES.map(p => {
+     let positive=0, negative=0;
+@@ -182,15 +234,19 @@
+ 
+   for(const d of active){
+     for(const template of d.profile!.issue_templates){
+-      const matchedPages=pages.filter(p=>template.signals.some(r=>regexTest(r,p.text))).map(p=>p.page);
+-      if(matchedPages.length >= (template.minimum_page_hits||1)) out.push({issue:template.question,basis:template.basis,pages:matchedPages.slice(0,12),domain:d.id,id:template.id,query_terms:template.query_terms||[]});
++      const matchedPageObjects=pages.filter(p=>template.signals.some(r=>regexTest(r,p.text)));
++      const matchedPages=matchedPageObjects.map(p=>p.page);
++      if(matchedPages.length >= (template.minimum_page_hits||1) && issueMaterialitySatisfied(template.id,text,matchedPageObjects.map(p=>p.text))) {
++        out.push({issue:template.question,basis:template.basis,pages:matchedPages.slice(0,12),domain:d.id,id:template.id,query_terms:template.query_terms||[]});
++      }
+     }
+   }
+ 
+   // Cross-cutting issues (apply regardless of primary domain)
+   for(const template of CROSS_CUTTING_ISSUES){
+-    const matchedPages=pages.filter(p=>template.signals.some(r=>regexTest(r,p.text))).map(p=>p.page);
+-    if(matchedPages.length>0){
++    const matchedPageObjects=pages.filter(p=>template.signals.some(r=>regexTest(r,p.text)));
++    const matchedPages=matchedPageObjects.map(p=>p.page);
++    if(matchedPages.length>0 && issueMaterialitySatisfied(template.id,text,matchedPageObjects.map(p=>p.text))){
+       out.push({issue:template.question,basis:template.basis,pages:matchedPages.slice(0,12),domain:(context.primary.id||'PERDATA_UMUM') as LegalDomainId,id:template.id,query_terms:template.query_terms||[]});
+     }
+   }
+@@ -206,6 +262,13 @@
+   const seen=new Set<string>();
+   let filtered=out.filter(x=>{const k=`${x.domain}:${x.id}`;if(superseded.has(k)||seen.has(k))return false;seen.add(k);return true});
+ 
++  // Avoid duplicate civil/criminal boundary questions. When the family/waris
++  // profile already produced the more concrete possession/damage issue, the
++  // generic cross-cutting boundary adds no independent decision point.
++  if (filtered.some(x=>x.id==='civil-criminal-response')) {
++    filtered=filtered.filter(x=>x.id!=='civil-criminal-boundary');
++  }
++
+   // Open-world fallback: when no ontology template fires, do not force a domain-specific answer.
+   // Build a neutral issue from material source language and let retrieval/verification determine the law.
+   if(!filtered.length){

@@ -3,7 +3,6 @@ import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { randomUUID, createHash } from 'crypto';
 import { db } from './server/db';
 import {
@@ -14,9 +13,11 @@ import {
   generateCommunicationAI,
   summarizeSourceDeterministically
 } from './server/localReasoning';
-import { runCaseAnalysis } from './server/caseAnalysis';
+import { runCaseAnalysis, CASE_ANALYSIS_CONTRACT_VERSION } from './server/caseAnalysis';
 import { createDocxBuffer, createPdfBuffer, createWorkingDocumentDocxBuffer } from './server/exporters';
 import { extractUploadedDocument } from './server/documentIngestion';
+import { caseJobStore, type CaseJobProgress } from './server/caseJobStore';
+import { caseLifecycleState, isCaseAnalysisFinalized, validateReasoningDocumentIntegrity } from './server/caseIntegrityPolicy.mjs';
 
 // Load local developer credentials first, then fall back to .env without overriding them.
 dotenv.config({ path: '.env.local' });
@@ -124,13 +125,57 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
-// In-flight progress tracker for Case Analysis
-const progressMap = new Map<string, { percent: number; stage: string; detail: string; case_id?: number; error?: string }>();
+// In-flight progress tracker for Case Analysis. The Map is the fast runtime
+// view; caseJobStore mirrors it to disk so browser/proxy timeout does not erase
+// job identity, progress, or the reserved history record.
+type RuntimeCaseProgress = CaseJobProgress;
+const progressMap = new Map<string, RuntimeCaseProgress>();
+const progressPersistState = new Map<string, { at:number; percent:number; stage:string; page?:number; completed?:number }>();
 
 function scheduleProgressCleanup(progressId: string, delayMs: number): void {
   const timer = setTimeout(() => progressMap.delete(progressId), delayMs);
   // Cleanup timers are bookkeeping only and must not prevent graceful shutdown.
   (timer as any).unref?.();
+}
+
+function setCaseProgress(progressId: string, patch: Partial<RuntimeCaseProgress>): RuntimeCaseProgress {
+  const previous = progressMap.get(progressId) || caseJobStore.get(progressId)?.progress || {
+    percent: 0, stage: 'QUEUED', detail: 'Case Analysis masuk antrean.', updated_at: new Date().toISOString()
+  };
+  const incomingPercent = Number(patch.percent ?? previous.percent ?? 0);
+  const next: RuntimeCaseProgress = {
+    ...previous,
+    ...patch,
+    // A parallel OCR worker may report pages out of order. UI progress must
+    // never move backwards merely because another lane emitted later.
+    percent: Math.max(Number(previous.percent || 0), Number.isFinite(incomingPercent) ? incomingPercent : 0),
+    updated_at: new Date().toISOString(),
+    failed_pages: Array.from(new Set([...(previous.failed_pages || []), ...(patch.failed_pages || [])])).sort((a,b)=>a-b),
+  };
+  progressMap.set(progressId, next);
+  const now = Date.now();
+  const persisted = progressPersistState.get(progressId);
+  const shouldPersist = !persisted
+    || now - persisted.at >= 750
+    || persisted.stage !== next.stage
+    || persisted.page !== next.page
+    || persisted.completed !== next.pages_completed
+    || Math.abs(Number(next.percent || 0) - persisted.percent) >= 0.5
+    || Number(next.percent || 0) >= 100;
+  if (shouldPersist) {
+    caseJobStore.updateProgress(progressId, next);
+    progressPersistState.set(progressId, { at:now, percent:Number(next.percent || 0), stage:next.stage, page:next.page, completed:next.pages_completed });
+  }
+  return next;
+}
+
+// Restore durable history snapshots after a runtime restart. A RUNNING job
+// cannot still be executing after process restart, so it becomes explicitly
+// recoverable rather than pretending to be alive forever.
+caseJobStore.markInterruptedRunningJobs();
+for (const job of caseJobStore.list(500)) {
+  if (job.record_snapshot?.id) db.restoreCaseAnalysis(job.record_snapshot);
+  progressMap.set(job.token, job.progress);
 }
 
 // -------------------------------------------------------------
@@ -471,6 +516,10 @@ app.post('/api/review', expensiveAnalysisLimit, upload.single('file') as any, as
     if (req.file) {
       filename = req.file.originalname;
       const ingested = await extractUploadedDocument(req.file.buffer, req.file.originalname, req.file.mimetype);
+      const integrity = validateReasoningDocumentIntegrity({ inputType:'document', text:ingested.text, ingestion:ingested });
+      if (!integrity.ok) {
+        return res.status(422).json({ success:false, error:'Integritas hasil ingestion belum cukup untuk review kontrak.', integrity });
+      }
       text = ingested.text || text;
     }
 
@@ -999,116 +1048,269 @@ app.post('/api/communication/whatsapp-link', (req, res) => {
 // -------------------------------------------------------------
 // 9. Case Analysis (Evidence-to-Action)
 // -------------------------------------------------------------
-app.get('/api/case-analysis', (req, res) => {
-  const limit = parseInt(req.query.limit as string) || 30;
-  res.json({
-    success: true,
-    data: db.getCaseAnalyses(limit)
-  });
-});
+function reserveCaseAnalysisRecord(meta: {
+  title:string; filename?:string; input_type:'narrative'|'document'|'narrative+document';
+  narrative:string; client_id?:string; client_name?:string; progressId:string;
+}) {
+  return db.saveCaseAnalysis({
+    title: meta.title,
+    input_type: meta.input_type,
+    filename: meta.filename,
+    source_text: meta.narrative || '',
+    client_id: meta.client_id,
+    client_name: meta.client_name,
+    facts: [], legal_issues: [], applicable_law: [],
+    summary: 'Case Analysis sedang diproses.',
+    legal_analysis: '', arguments_for: [], arguments_against: [],
+    evidence_needed: [], evidentiary_gaps: [], risks: [], risk_matrix: [], overall_risk_score: 0,
+    best_case: '', worst_case: '',
+    verification_note: 'Analisis masih berjalan. Hasil substantif belum tersedia.',
+    recommendations: [],
+    analysis_provenance: {
+      mode:'DETERMINISTIC_FORENSIC_ENGINE', provider:'LexiCore Local Kernel',
+      job_status:'RUNNING', progress_token:meta.progressId, finalized:false, timestamp:new Date().toISOString(),
+    },
+    case_readiness: {}, case_working_paper: {}, analysis_readiness: {},
+    document_reading: { status:'PROCESSING', segments_read:0, segments_total:0, characters:0 },
+    document_ingestion: { mode: meta.filename ? 'PENDING' : 'TEXT', coverage_ratio: meta.filename ? 0 : 1, manual_review_required:false },
+    professional_verification:'PENDING',
+  } as any);
+}
 
-app.get('/api/case-analysis/progress/:token', (req, res) => {
-  const token = req.params.token;
-  const progress = progressMap.get(token) || { percent: 0, stage: 'UNKNOWN', detail: 'Progress token tidak ditemukan.' };
-  res.json({ success: true, data: progress });
-});
+function markCaseJobFailure(caseId:number, progressId:string, err:any) {
+  const message = String(err?.message || err || 'Gagal menjalankan Case Analysis');
+  const current = db.getCaseAnalysis(caseId);
+  if (!current) return null;
+  const updated = db.updateCaseAnalysis(caseId, {
+    summary:'Case Analysis belum selesai.',
+    verification_note:`Proses terhenti dan dapat dipulihkan. ${message}`,
+    analysis_provenance:{ ...(current as any).analysis_provenance, job_status:'FAILED_RECOVERABLE', progress_token:progressId, finalized:false, error:message, timestamp:new Date().toISOString() },
+    document_reading:{ ...(current as any).document_reading, status:'FAILED_RECOVERABLE' },
+  } as any);
+  if (updated) caseJobStore.update(progressId, { record_snapshot:updated });
+  return updated;
+}
 
-// Recovery endpoint: a Case Analysis may finish even if the original HTTP response
-// is interrupted by a browser/proxy/network reset. The UI can recover the stored
-// result using the same progress token instead of resubmitting a duplicate job.
-app.get('/api/case-analysis/result/:token', (req, res) => {
-  const token = req.params.token;
-  const progress = progressMap.get(token);
-  if (!progress) return res.status(404).json({ success:false, error:'Progress token tidak ditemukan atau sudah kedaluwarsa.' });
-  if (progress.stage === 'ERROR') return res.status(500).json({ success:false, error:progress.error || progress.detail || 'Case Analysis gagal.' });
-  if (progress.stage !== 'COMPLETE' || !progress.case_id) {
-    return res.status(202).json({ success:true, pending:true, data:progress });
-  }
-  const result = db.getCaseAnalysis(progress.case_id);
-  if (!result) return res.status(404).json({ success:false, error:'Hasil Case Analysis belum tersedia pada penyimpanan.' });
-  return res.json({ success:true, pending:false, data:result, case_id:progress.case_id });
-});
-
-app.post('/api/case-analysis', expensiveAnalysisLimit, upload.single('file') as any, async (req, res) => {
-  const progressId = (req.headers['x-lexicore-progress-id'] as string) || `prog-${Date.now()}`;
-  const existing = progressMap.get(progressId);
-  if (existing && existing.stage !== 'ERROR' && existing.stage !== 'COMPLETE') {
-    return res.status(409).json({ success:false, error:'Case Analysis dengan token yang sama masih berjalan.', progress:existing });
-  }
-  if (existing?.stage === 'COMPLETE' && existing.case_id) {
-    const prior = db.getCaseAnalysis(existing.case_id);
-    if (prior) return res.json({ success:true, data:prior, case_id:existing.case_id, recovered:true });
-  }
-
-  progressMap.set(progressId, { percent: 15, stage: 'UPLOAD_STORED', detail: 'Dokumen tersimpan, membaca materi perkara.' });
+async function executeCaseAnalysisJob(progressId:string, caseId:number, requestData:any, fileBuffer?:Buffer) {
+  const supplementalNarrative = String(requestData?.narrative || '').trim();
+  let narrative = supplementalNarrative;
+  const title = String(requestData?.title || 'Case Analysis Perkara');
+  const filename = String(requestData?.originalname || '');
+  let documentIngestion:any = null;
 
   try {
-    const supplementalNarrative = String(req.body?.narrative || '').trim();
-    let narrative = supplementalNarrative;
-    let title = req.body?.title || 'Case Analysis Perkara';
-    let filename = '';
+    setCaseProgress(progressId, { percent:15, stage:'UPLOAD_STORED', detail:'Dokumen tersimpan lokal; memulai pembacaan materi perkara.', case_id:caseId });
 
-    let documentIngestion: any = null;
-    if (req.file) {
-      filename = req.file.originalname;
-      progressMap.set(progressId, { percent: 28, stage: 'DOCUMENT_READING', detail: 'Mengekstrak teks dokumen tanpa memasukkan data biner ke analisis.' });
+    if (fileBuffer) {
+      setCaseProgress(progressId, { percent:28, stage:'DOCUMENT_READING', detail:'Mengekstrak teks dokumen tanpa memasukkan data biner ke analisis.', case_id:caseId });
       documentIngestion = await extractUploadedDocument(
-        req.file.buffer,
-        req.file.originalname,
-        req.file.mimetype,
+        fileBuffer,
+        filename || 'source.bin',
+        String(requestData?.mimetype || ''),
         (ocrProgress) => {
-          progressMap.set(progressId, {
+          setCaseProgress(progressId, {
             percent: Math.max(28, Math.min(44, Number(ocrProgress.percent || 28))),
             stage: ocrProgress.stage,
-            detail: ocrProgress.detail
+            detail: ocrProgress.detail,
+            case_id:caseId,
+            page:ocrProgress.page,
+            pages:ocrProgress.pages,
+            pages_completed:ocrProgress.pages_completed,
+            failed_pages:ocrProgress.failed_pages,
           });
         }
       );
-      narrative = (narrative + '\n\n' + documentIngestion.text).trim();
+      narrative = `${narrative}\n\n${documentIngestion.text || ''}`.trim();
     }
 
     if (!narrative || narrative.trim().length < 40) {
-      progressMap.delete(progressId);
-      return res.status(400).json({
-        success: false,
-        error: 'Narasi perkara minimal 40 karakter diperlukan untuk menjalankan Case Analysis.'
-      });
+      throw new Error('Narasi perkara minimal 40 karakter diperlukan untuk menjalankan Case Analysis.');
     }
 
-    progressMap.set(progressId, { percent: 45, stage: 'DOCUMENT_READING_COMPLETE', detail: 'Teks perkara dipetakan, mengidentifikasi subjek dan isu hukum.' });
-
-    progressMap.set(progressId, { percent: 65, stage: 'CASE_MAPPING', detail: 'Menyusun matriks pembuktian dan mensintesis dasar hukum positif.' });
+    setCaseProgress(progressId, { percent:45, stage:'DOCUMENT_READING_COMPLETE', detail:'Teks perkara dipetakan, mengidentifikasi subjek dan isu hukum.', case_id:caseId });
+    setCaseProgress(progressId, { percent:65, stage:'CASE_MAPPING', detail:'Menyusun matriks pembuktian dan mensintesis dasar hukum positif.', case_id:caseId });
 
     const result = await runCaseAnalysis({
       title,
       narrative,
       filename,
-      input_type: req.file ? (req.body?.narrative?.trim() ? 'narrative+document' : 'document') : 'narrative',
-      regulatory_mode: req.body?.regulatory_mode || 'hybrid',
-      official_source_strategy: String(req.body?.manual_official_sources || '').split(/\r?\n|;/).map((x:string)=>x.trim()).filter(Boolean).length ? 'manual_plus_auto' : 'auto',
-      manual_official_sources: String(req.body?.manual_official_sources || '').split(/\r?\n|;/).map((x:string)=>x.trim()).filter(Boolean).slice(0,20),
+      input_type: requestData?.input_type || (fileBuffer ? (supplementalNarrative ? 'narrative+document' : 'document') : 'narrative'),
+      regulatory_mode: requestData?.regulatory_mode || 'hybrid',
+      official_source_strategy: String(requestData?.manual_official_sources || '').split(/\r?\n|;/).map((x:string)=>x.trim()).filter(Boolean).length ? 'manual_plus_auto' : 'auto',
+      manual_official_sources: String(requestData?.manual_official_sources || '').split(/\r?\n|;/).map((x:string)=>x.trim()).filter(Boolean).slice(0,20),
       document_ingestion: documentIngestion || undefined,
       supplemental_narrative: supplementalNarrative || undefined,
-      client_id: req.body?.client_id ? String(req.body.client_id).trim() : undefined,
-      client_name: req.body?.client_name ? String(req.body.client_name).trim() : undefined
+      client_id: requestData?.client_id ? String(requestData.client_id).trim() : undefined,
+      client_name: requestData?.client_name ? String(requestData.client_name).trim() : undefined,
+      existing_case_id: caseId,
+      on_progress: ({ percent, stage, detail }) => {
+        setCaseProgress(progressId, { percent:Math.max(65, Math.min(99, Number(percent || 65))), stage, detail, case_id:caseId });
+      }
     });
 
-    progressMap.set(progressId, { percent: 100, stage: 'COMPLETE', detail: 'Working paper siap ditinjau.', case_id: result.id });
-    scheduleProgressCleanup(progressId, 5 * 60 * 1000);
+    const finalizedResult = db.updateCaseAnalysis(result.id, {
+      analysis_provenance:{ ...(result as any).analysis_provenance, job_status:'COMPLETED', progress_token:progressId, finalized:true, timestamp:new Date().toISOString() },
+    } as any) || result;
+    const completed = setCaseProgress(progressId, { percent:100, stage:'COMPLETED', detail:'Working paper siap ditinjau.', case_id:finalizedResult.id, pages_completed:documentIngestion?.pages_total || undefined, failed_pages:documentIngestion?.failed_pages || [] });
+    caseJobStore.update(progressId, { status:'COMPLETED', progress:completed, record_snapshot:finalizedResult });
+    // Source binary is needed only while a job is recoverable. Delete it after
+    // successful completion; the legal working paper/history record remains.
+    caseJobStore.deleteSource(progressId);
+    scheduleProgressCleanup(progressId, 15 * 60 * 1000);
+    return finalizedResult;
+  } catch (err:any) {
+    const message = String(err?.message || err || 'Gagal menjalankan Case Analysis');
+    const recoverable = Boolean(caseJobStore.readSource(progressId) || supplementalNarrative.length >= 40);
+    const failed = setCaseProgress(progressId, { percent:100, stage:recoverable?'FAILED_RECOVERABLE':'ERROR', detail:message, error:message, case_id:caseId });
+    const snapshot = markCaseJobFailure(caseId, progressId, err);
+    caseJobStore.update(progressId, { status:recoverable?'FAILED_RECOVERABLE':'ERROR', progress:failed, record_snapshot:snapshot || undefined });
+    scheduleProgressCleanup(progressId, 15 * 60 * 1000);
+    throw err;
+  }
+}
 
-    res.json({
-      success: true,
-      data: result,
-      case_id: result.id
+app.get('/api/case-analysis', (req, res) => {
+  const limit = parseInt(req.query.limit as string) || 30;
+  const data = db.getCaseAnalyses(limit).map((record:any) => {
+    const job = caseJobStore.findByCaseId(record.id);
+    return {
+      ...record,
+      job_status: job?.status || caseLifecycleState(record),
+      job_progress: job?.progress || null,
+      finalized: isCaseAnalysisFinalized(record),
+    };
+  });
+  res.json({ success:true, data });
+});
+
+function requireFinalizedCaseAnalysis(record:any, res:express.Response, operation:string): boolean {
+  if (isCaseAnalysisFinalized(record)) {
+    const contract = String(record?.analysis_provenance?.contract_version || '');
+    if (contract === CASE_ANALYSIS_CONTRACT_VERSION) return true;
+    res.status(409).json({
+      success:false,
+      error:`Case Analysis dibuat dengan canonical contract lama (${contract || 'UNVERSIONED'}). Jalankan ulang analisis sebelum ${operation.toLowerCase()} agar PDF/DOCX tidak mengekspor hasil runtime lama.`,
+      case_id:record?.id,
+      contract_version:contract || 'UNVERSIONED',
+      required_contract_version:CASE_ANALYSIS_CONTRACT_VERSION,
+      reanalysis_required:true,
     });
-  } catch (err: any) {
-    progressMap.set(progressId, { percent: 100, stage: 'ERROR', detail: err.message || 'Gagal menjalankan Case Analysis', error: err.message || 'Gagal menjalankan Case Analysis' });
-    scheduleProgressCleanup(progressId, 2 * 60 * 1000);
+    return false;
+  }
+  const state = caseLifecycleState(record);
+  const job = record?.id ? caseJobStore.findByCaseId(record.id) : null;
+  res.status(409).json({
+    success:false,
+    error:`Case Analysis belum final (${state}). ${operation} diblokir agar hasil sementara tidak diperlakukan sebagai pendapat hukum final.`,
+    case_id:record?.id,
+    job_status:job?.status || state,
+    progress:job?.progress || null,
+    recoverable:(job?.status || state)==='FAILED_RECOVERABLE',
+    resume_url:job?.status==='FAILED_RECOVERABLE' ? `/api/case-analysis/resume/${encodeURIComponent(job.token)}` : undefined,
+  });
+  return false;
+}
+
+app.get('/api/case-analysis/progress/:token', (req, res) => {
+  const token = req.params.token;
+  const durable = caseJobStore.get(token);
+  const progress = progressMap.get(token) || durable?.progress || { percent:0, stage:'UNKNOWN', detail:'Progress token tidak ditemukan.', updated_at:new Date().toISOString() };
+  res.json({ success:true, data:progress, durable_status:durable?.status || null });
+});
+
+app.get('/api/case-analysis/result/:token', (req, res) => {
+  const token = req.params.token;
+  const durable = caseJobStore.get(token);
+  const progress = progressMap.get(token) || durable?.progress;
+  if (!progress && !durable) return res.status(404).json({ success:false, error:'Progress token tidak ditemukan.' });
+
+  if (durable?.record_snapshot?.id && !db.getCaseAnalysis(durable.record_snapshot.id)) {
+    db.restoreCaseAnalysis(durable.record_snapshot);
+  }
+
+  if (durable?.status === 'COMPLETED' || ['COMPLETE','COMPLETED'].includes(String(progress?.stage || ''))) {
+    const caseId = Number(progress?.case_id || durable?.case_id || 0);
+    const result = caseId ? db.getCaseAnalysis(caseId) : durable?.record_snapshot;
+    if (result) return res.json({ success:true, pending:false, data:result, case_id:result.id, recovered:true });
+  }
+  if (durable?.status === 'FAILED_RECOVERABLE' || progress?.stage === 'FAILED_RECOVERABLE') {
+    return res.status(409).json({ success:false, pending:false, recoverable:true, data:progress, case_id:durable?.case_id, resume_url:`/api/case-analysis/resume/${encodeURIComponent(token)}` });
+  }
+  if (durable?.status === 'ERROR' || progress?.stage === 'ERROR') {
+    return res.status(500).json({ success:false, error:progress?.error || progress?.detail || 'Case Analysis gagal.' });
+  }
+  return res.status(202).json({ success:true, pending:true, data:progress, case_id:durable?.case_id });
+});
+
+app.post('/api/case-analysis/resume/:token', expensiveAnalysisLimit, async (req, res) => {
+  const token = req.params.token;
+  const job = caseJobStore.get(token);
+  if (!job) return res.status(404).json({ success:false, error:'Job Case Analysis tidak ditemukan.' });
+  if (job.status === 'COMPLETED') {
+    if (job.record_snapshot?.id && !db.getCaseAnalysis(job.record_snapshot.id)) db.restoreCaseAnalysis(job.record_snapshot);
+    const result = db.getCaseAnalysis(job.case_id) || job.record_snapshot;
+    return res.json({ success:true, data:result, case_id:job.case_id, recovered:true });
+  }
+  const runtime = progressMap.get(token);
+  if (job.status === 'RUNNING' && runtime && !['ERROR','FAILED_RECOVERABLE','COMPLETE','COMPLETED'].includes(runtime.stage)) {
+    return res.status(409).json({ success:false, error:'Job masih berjalan.', progress:runtime });
+  }
+  const source = caseJobStore.readSource(token) || undefined;
+  if (job.input_type !== 'narrative' && !source) return res.status(410).json({ success:false, error:'Sumber dokumen untuk resume tidak tersedia.' });
+  const resetProgress:RuntimeCaseProgress = {
+    percent:0, stage:'RESUMING', detail:'Memulihkan job Case Analysis dari checkpoint lokal.', case_id:job.case_id,
+    updated_at:new Date().toISOString(), failed_pages:[]
+  };
+  progressMap.set(token, resetProgress);
+  progressPersistState.delete(token);
+  caseJobStore.update(token, { status:'RUNNING', progress:resetProgress });
+  try {
+    const result = await executeCaseAnalysisJob(token, job.case_id, { ...job.request, title:job.title, input_type:job.input_type }, source);
+    return res.json({ success:true, data:result, case_id:result.id, resumed:true });
+  } catch (err:any) {
+    return res.status(500).json({ success:false, error:String(err?.message || err) });
+  }
+});
+
+app.post('/api/case-analysis', expensiveAnalysisLimit, upload.single('file') as any, async (req, res) => {
+  const progressId = String((req.headers['x-lexicore-progress-id'] as string) || `prog-${Date.now()}`);
+  const durableExisting = caseJobStore.get(progressId);
+  const runtimeExisting = progressMap.get(progressId);
+  if (runtimeExisting && !['ERROR','FAILED_RECOVERABLE','COMPLETE','COMPLETED'].includes(runtimeExisting.stage)) {
+    return res.status(409).json({ success:false, error:'Case Analysis dengan token yang sama masih berjalan.', progress:runtimeExisting, case_id:runtimeExisting.case_id });
+  }
+  if (durableExisting?.status === 'COMPLETED') {
+    if (durableExisting.record_snapshot?.id && !db.getCaseAnalysis(durableExisting.record_snapshot.id)) db.restoreCaseAnalysis(durableExisting.record_snapshot);
+    const prior = db.getCaseAnalysis(durableExisting.case_id) || durableExisting.record_snapshot;
+    if (prior) return res.json({ success:true, data:prior, case_id:durableExisting.case_id, recovered:true });
+  }
+  if (durableExisting && durableExisting.status !== 'ERROR') {
+    return res.status(409).json({ success:false, error:'Token sudah memiliki job yang dapat dipulihkan. Gunakan endpoint resume, jangan membuat job duplikat.', progress:durableExisting.progress, case_id:durableExisting.case_id, recoverable:durableExisting.status==='FAILED_RECOVERABLE' });
+  }
+
+  const supplementalNarrative = String(req.body?.narrative || '').trim();
+  const title = String(req.body?.title || 'Case Analysis Perkara');
+  const filename = req.file?.originalname || '';
+  const inputType:'narrative'|'document'|'narrative+document' = req.file ? (supplementalNarrative ? 'narrative+document' : 'document') : 'narrative';
+  const clientId = req.body?.client_id ? String(req.body.client_id).trim() : undefined;
+  const clientName = req.body?.client_name ? String(req.body.client_name).trim() : undefined;
+
+  const placeholder = reserveCaseAnalysisRecord({ title, filename, input_type:inputType, narrative:supplementalNarrative, client_id:clientId, client_name:clientName, progressId });
+  const initialProgress:RuntimeCaseProgress = { percent:15, stage:'UPLOAD_STORED', detail:'Job Case Analysis tersimpan dan siap diproses.', case_id:placeholder.id, updated_at:new Date().toISOString() };
+  caseJobStore.create({
+    token:progressId, status:'RUNNING', case_id:placeholder.id, title, filename, input_type:inputType,
+    request:{ narrative:supplementalNarrative, regulatory_mode:req.body?.regulatory_mode || 'hybrid', manual_official_sources:String(req.body?.manual_official_sources || ''), client_id:clientId, client_name:clientName, mimetype:req.file?.mimetype || '', originalname:filename },
+    progress:initialProgress, record_snapshot:placeholder,
+  });
+  if (req.file) caseJobStore.saveSource(progressId, req.file.buffer, filename);
+  progressMap.set(progressId, initialProgress);
+
+  try {
+    const result = await executeCaseAnalysisJob(progressId, placeholder.id, { ...caseJobStore.get(progressId)?.request, title, input_type:inputType }, req.file?.buffer);
+    if (!res.writableEnded) return res.json({ success:true, data:result, case_id:result.id });
+  } catch (err:any) {
     console.error('Case analysis error:', err);
-    res.status(500).json({
-      success: false,
-      error: err.message || 'Gagal menjalankan Case Analysis'
-    });
+    if (!res.writableEnded) return res.status(500).json({ success:false, error:String(err?.message || err), case_id:placeholder.id, recoverable:true, progress_token:progressId });
   }
 });
 
@@ -1165,6 +1367,7 @@ app.post('/api/case-analysis/:case_id/generate-draft', async (req, res) => {
     if (!Number.isInteger(caseId) || caseId <= 0) return res.status(400).json({ success:false, error:'ID Case Analysis tidak valid.' });
     const c = db.getCaseAnalysis(caseId);
     if (!c) return res.status(404).json({ success:false, error:'Case Analysis tidak ditemukan.' });
+    if (!requireFinalizedCaseAnalysis(c, res, 'Pembuatan legal draft')) return;
 
     const templates = db.getTemplates() as Record<string, any>;
     const requestedType = String(req.body?.doc_type || 'Legal Opinion');
@@ -1220,6 +1423,7 @@ app.post('/api/case-analysis/:case_id/generate-compliance', (req, res) => {
     if (!Number.isInteger(caseId) || caseId <= 0) return res.status(400).json({ success:false, error:'ID Case Analysis tidak valid.' });
     const c = db.getCaseAnalysis(caseId);
     if (!c) return res.status(404).json({ success:false, error:'Case Analysis tidak ditemukan.' });
+    if (!requireFinalizedCaseAnalysis(c, res, 'Pembuatan compliance/risk assessment')) return;
 
     const rows = Array.isArray(c.risk_matrix) ? c.risk_matrix : [];
     const matrix = rows.map((r:any) => ({
@@ -1267,6 +1471,23 @@ app.post('/api/case-analysis/:case_id/generate-compliance', (req, res) => {
   }
 });
 
+function buildCaseExportIdentity(caseId: number) {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  }).formatToParts(now);
+  const pick = (type: string) => parts.find(x => x.type === type)?.value || '00';
+  const date = `${pick('year')}${pick('month')}${pick('day')}`;
+  const time = `${pick('hour')}${pick('minute')}${pick('second')}`;
+  const token = randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase();
+  return {
+    id: `LC-CA${caseId}-${date}-${time}-${token}`,
+    generated_at: now.toISOString(),
+    generated_at_wib: `${pick('day')}-${pick('month')}-${pick('year')} ${pick('hour')}:${pick('minute')}:${pick('second')} WIB`,
+  };
+}
+
 app.get('/api/case-analysis/export/:fmt/:case_id', (req, res) => {
   try {
     const fmt = String(req.params.fmt || '').toLowerCase();
@@ -1283,6 +1504,7 @@ app.get('/api/case-analysis/export/:fmt/:case_id', (req, res) => {
         error: 'Case Analysis tidak ditemukan. Buka ulang hasil dari Riwayat Case atau jalankan analisis kembali.'
       });
     }
+    if (!requireFinalizedCaseAnalysis(analysis, res, 'Ekspor PDF/DOCX')) return;
 
     const safeTitle = String(analysis.title || 'Case-Analysis-LexiCore')
       .normalize('NFKD')
@@ -1292,19 +1514,39 @@ app.get('/api/case-analysis/export/:fmt/:case_id', (req, res) => {
       .replace(/^-|-$/g, '')
       .slice(0, 100) || 'Case-Analysis-LexiCore';
 
+    const exportMeta = buildCaseExportIdentity(caseId);
+    const profile = db.getProfile();
+    const exportAnalysis = {
+      ...analysis,
+      user_name: profile.configured ? String(profile.display_name || '').trim() : '',
+      user_profile: {
+        display_name: String(profile.display_name || '').trim(),
+        professional_name: String(profile.professional_name || '').trim(),
+        firm_name: String(profile.firm_name || '').trim(),
+        credentials: String(profile.credentials || '').trim(),
+      },
+      export_meta: { ...exportMeta, case_analysis_id: caseId, format: fmt.toUpperCase() },
+    };
+    const exportBaseName = `${safeTitle}__${exportMeta.id}`;
+    res.setHeader('X-LexiCore-Export-Id', exportMeta.id);
+    res.setHeader('X-LexiCore-Export-Time', exportMeta.generated_at);
+    res.setHeader('X-LexiCore-Analysis-Contract', CASE_ANALYSIS_CONTRACT_VERSION);
+
     if (fmt === 'pdf') {
-      const data = createPdfBuffer(analysis);
+      const data = createPdfBuffer(exportAnalysis);
+      db.logAudit('CASE_ANALYSIS_EXPORT', `Case Analysis #${caseId} exported PDF | ${exportMeta.id}`);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${exportBaseName}.pdf"`);
       res.setHeader('Content-Length', String(data.length));
       res.setHeader('Cache-Control', 'no-store');
       return res.send(data);
     }
 
     if (fmt === 'docx') {
-      const data = createDocxBuffer(analysis);
+      const data = createDocxBuffer(exportAnalysis);
+      db.logAudit('CASE_ANALYSIS_EXPORT', `Case Analysis #${caseId} exported DOCX | ${exportMeta.id}`);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.docx"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${exportBaseName}.docx"`);
       res.setHeader('Content-Length', String(data.length));
       res.setHeader('Cache-Control', 'no-store');
       return res.send(data);
@@ -1437,6 +1679,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // -------------------------------------------------------------
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'

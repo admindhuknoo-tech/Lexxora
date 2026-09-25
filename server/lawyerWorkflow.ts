@@ -1,3 +1,4 @@
+import { resolveProceduralPosture, type ProceduralStage } from './proceduralPosture';
 export type LawyerOrientation =
   | 'CRIMINAL_DEFENSE'
   | 'CIVIL_PLAINTIFF'
@@ -5,15 +6,7 @@ export type LawyerOrientation =
   | 'ADMINISTRATIVE_RESPONSE'
   | 'GENERAL_COUNSEL_REVIEW';
 
-export type ProceduralStage =
-  | 'PRE_LITIGATION'
-  | 'INVESTIGATION'
-  | 'PROSECUTION'
-  | 'EVIDENCE_HEARING'
-  | 'PLEADING'
-  | 'APPEAL'
-  | 'EXECUTION'
-  | 'CONSULTATION';
+export type { ProceduralStage } from './proceduralPosture';
 
 export type WitnessCategory =
   | 'FACT_WITNESS'
@@ -142,8 +135,20 @@ function orientationFrom(
       confidence:'MEDIUM',
     };
   }
-  if(sourceRole==='DEFENSE_SUBMISSION_WITH_EXHIBITS'||/\btergugat\b|jawaban\s+tergugat/.test(t))return {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon atau pihak yang membantah klaim',confidence:'HIGH'};
-  if(sourceRole==='COMPLAINT_OR_PETITION'||/\bpenggugat\b|\bpemohon\b|gugatan/.test(t))return {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon atau pihak yang mengajukan klaim',confidence:'MEDIUM'};
+  if(sourceRole==='DEFENSE_SUBMISSION_WITH_EXHIBITS')return {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon atau pihak yang membantah klaim',confidence:'HIGH'};
+  if(sourceRole==='COMPLAINT_OR_PETITION')return {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon atau pihak yang mengajukan klaim',confidence:'MEDIUM'};
+  // Outside a litigation-role source, mere mention or definition of party labels
+  // is not a representation signal. Prefer explicit counsel/self-identification;
+  // if both sides are merely defined, remain neutral instead of picking the first branch.
+  const counselDefense=/\b(?:kuasa\s+hukum|kami\s+selaku|bertindak\s+untuk\s+dan\s+atas\s+nama)\s+(?:para\s+)?tergugat\b/.test(t);
+  const counselPlaintiff=/\b(?:kuasa\s+hukum|kami\s+selaku|bertindak\s+untuk\s+dan\s+atas\s+nama)\s+(?:para\s+)?penggugat\b/.test(t);
+  if(counselDefense&&!counselPlaintiff) return {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon atau pihak yang membantah klaim',confidence:'MEDIUM'};
+  if(counselPlaintiff&&!counselDefense) return {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon atau pihak yang mengajukan klaim',confidence:'MEDIUM'};
+  const definedDefense=/\bselanjutnya\s+disebut\s+(?:sebagai\s+)?tergugat\b/.test(t);
+  const definedPlaintiff=/\bselanjutnya\s+disebut\s+(?:sebagai\s+)?penggugat\b/.test(t);
+  if(definedDefense!==definedPlaintiff) return definedDefense
+    ? {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon yang teridentifikasi eksplisit; konfirmasi mandat representasi',confidence:'LOW'}
+    : {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon yang teridentifikasi eksplisit; konfirmasi mandat representasi',confidence:'LOW'};
   if(/keputusan\s+tata\s+usaha|pejabat\s+tata\s+usaha|keberatan\s+administratif|banding\s+administratif/.test(t))return {orientation:'ADMINISTRATIVE_RESPONSE',side:'Pihak dalam sengketa/keberatan administratif',confidence:'MEDIUM'};
   return {orientation:'GENERAL_COUNSEL_REVIEW',side:'Pihak yang memerlukan analisis dan strategi hukum',confidence:'LOW'};
 }
@@ -152,34 +157,31 @@ function orientationFrom(
 
 // ---------- Procedural stage ----------
 
-function detectProceduralStage(sourceRole:string,text:string):ProceduralStage{
-  const t=text.toLowerCase();
-  const pleadingShape=/(?:^|\n)\s*(?:repliek|replik|duplik|jawaban\s+(?:tergugat|penggugat)|kesimpulan\s+(?:para\s+)?pihak|eksepsi|pledoi|nota\s+pembelaan)\b/i.test(text)||/perkara\s+nomor\s+\d+\s*\/\s*pdt\./i.test(text);
-  if(sourceRole==='LITIGATION_SUBMISSION'||sourceRole==='PLEADING_OR_SUBMISSION'||pleadingShape)return 'PLEADING';
-  if(/\beksekusi\b|\bdieksekusi\b|\bpelelangan\b|\bsita\s+eksekusi\b|\baanmaning\b/.test(t))return 'EXECUTION';
-
-  // V6.7.4 — APPEAL requires an actual appellate marker.
-  // Generic "upaya hukum" and "verstek" are not appellate stages by themselves.
-  if(
-    /\bmemori\s+banding\b|\bkontra\s+memori\s+banding\b|\bpermohonan\s+banding\b|\bbanding\s+ke\s+pengadilan\s+tinggi\b|\bkasasi\b|\bmemori\s+kasasi\b|\bpeninjauan\s+kembali\b|\bpermohonan\s+pk\b|\bverzet\b/i.test(text)
-  )return 'APPEAL';
-
-  if(/\bsidang\s+pemeriksaan\s+saksi\b|\bagenda\s+sidang\b|\bpemeriksaan\s+saksi\b|\bpembuktian\s+di\s+persidangan\b/.test(t))return 'EVIDENCE_HEARING';
-  if(/\bpenuntut\s+umum\b|\bjaksa\s+penuntut\b|\bdakwaan\b|\bsurat\s+dakwaan\b|\bprapenuntutan\b/.test(t))return 'PROSECUTION';
-  const investigationSignals=/\bberita\s+acara\s+pemeriksaan\b|\bbap\b|\bpenyidikan\b|\bpenyidik\s+(?:memeriksa|menanyakan)\b|\btersangka\s+diperiksa\b|\bsaksi\s+diperiksa\b|\bpendampingan\s+pemeriksaan\b|\bpemeriksaan\s+tersangka\b/.test(t);
-  if(investigationSignals||sourceRole==='INVESTIGATION_OR_BAP')return 'INVESTIGATION';
-  if(
-    /\bsomasi\b|\bmediasi\b|\bnegosiasi\b|\bnon-litigasi\b|\bakan\s+melakukan\s+upaya\s+hukum\b|\bmeminta\s+kembali\b|\bpengembalian\s+(?:uang|pembayaran|dana)\b|\bpembatalan\s+(?:jual\s+beli|perjanjian)\b/i.test(text)
-  )return 'PRE_LITIGATION';
-  return 'CONSULTATION';
+function detectProceduralStage(sourceRole:string,text:string,title=''):ProceduralStage{
+  return resolveProceduralPosture({title,text,sourceRole}).stage;
 }
 
-function draftingStageStatus(stage: ProceduralStage, issueCount: number): LawyerWorkflowStage['status'] {
+function draftingStageStatus(stage: ProceduralStage, issueCount: number, proceduralAuthorityReady:boolean): LawyerWorkflowStage['status'] {
   if (issueCount <= 0) return 'BLOCKED';
+  // Stage-sensitive filings must not be called READY merely because an issue
+  // exists. They depend on at least one Section III authority that actually
+  // survived issue binding and carries procedural nexus for this posture.
+  if (['APPEAL','EXECUTION'].includes(stage) && !proceduralAuthorityReady) return 'PARTIAL';
   if (['PRE_LITIGATION','EVIDENCE_HEARING','PLEADING','APPEAL','EXECUTION'].includes(stage)) return 'READY';
   // INVESTIGATION / PROSECUTION may support internal preparation, but a final
   // pleading is procedurally premature. CONSULTATION likewise remains internal.
   return 'PARTIAL';
+}
+
+function hasStageProceduralAuthority(stage:ProceduralStage,laws:any[]):boolean{
+  if(!['APPEAL','EXECUTION'].includes(stage)) return true;
+  const hay=laws.map((x:any)=>`${clean(x?.regulation)} ${clean(x?.source)} ${clean(x?.article)} ${clean(x?.relevance)}`).join(' ').toLowerCase();
+  // A generic mention of "hukum acara/peradilan" is not enough to make a
+  // stage-specific filing READY.  The surviving Section III authority must
+  // carry stage-specific nexus.
+  if(stage==='APPEAL') return /banding|kasasi|peninjauan kembali|\bpk\b|verzet|tenggang\s+upaya\s+hukum/.test(hay);
+  if(stage==='EXECUTION') return /eksekusi|aanmaning|sita\s+eksekusi|pelelangan|dasar\s+eksekutorial/.test(hay);
+  return true;
 }
 
 function stageDraftDocument(orientation: LawyerOrientation, stage: ProceduralStage): string {
@@ -210,8 +212,6 @@ function stageDraftGuard(stage: ProceduralStage): string {
 
 // ---------- Financial / collateral ----------
 
-// ---------- Financial / collateral ----------
-
 function moneyTerms(text: string) {
   return uniq(
     (
@@ -234,12 +234,182 @@ function matchedSnippets(text: string, re: RegExp, max = 12) {
   }
   return uniq(out);
 }
-function hasFinancialContent(text: string, collateral: string[], repayment: string[], discrepancy: string[]): boolean {
-  if (moneyTerms(text).length > 0) return true;
-  if (collateral.length > 0) return true;
-  if (repayment.length > 0) return true;
-  if (discrepancy.length > 0 && /\b(?:kredit|pinjaman|utang|piutang|agunan|jaminan)\b/i.test(text)) return true;
+
+interface FinancialSignalProfile {
+  active: boolean;
+  amounts: string[];
+  collateral: string[];
+  repayment: string[];
+  discrepancies: string[];
+  payment_flow: string[];
+  valuation: string[];
+  account_records: string[];
+  personal_gain: string[];
+  credit_relationship: string[];
+  review_questions: string[];
+  outputs: string[];
+  detected_labels: string[];
+}
+
+function sentenceLikeSegments(text:string):string[]{
+  return String(text||'')
+    .replace(/---\s*HALAMAN\s+\d+\s*---/gi,' . ')
+    .split(/(?<=[.!?;])\s+|\n+/)
+    .map(clean)
+    .filter(x=>x.length>=8);
+}
+
+function positiveFinancialText(text:string):string{
+  const finance=/kredit|pinjaman|utang|piutang|debitur|kreditur|angsuran|pelunasan|agunan|jaminan|fidusia|hak\s+tanggungan|dijaminkan|diagunkan|bpkb|rekening|transfer|pembayaran|pencairan|taksasi|appraisal|bank|bpr|transaksi\s+keuangan/i;
+  return sentenceLikeSegments(text)
+    .filter(seg=>{
+      if(!finance.test(seg)) return true;
+      // Scope absence only to the clause it governs. A list such as
+      // "tidak ada tanah, sertifikat, bank, kredit atau agunan" must not
+      // activate finance, while a contrast such as "tidak ada tanah, tetapi
+      // kredit bank tetap ada" must preserve the asserted credit clause.
+      const asserted=seg
+        .replace(/\btidak\s+ada\b[^.;]*?(?=\b(?:namun|tetapi|sedangkan|melainkan)\b|[.;]|$)/gi,' ')
+        .replace(/\btanpa\s+(?:data\s+|bukti\s+|hubungan\s+)?(?:kredit|pinjaman|agunan|jaminan|transfer|transaksi(?:\s+keuangan)?|bank|pembiayaan)\b/gi,' ')
+        .replace(/\s+/g,' ')
+        .trim();
+      return finance.test(asserted);
+    })
+    .join(' . ');
+}
+
+function contextualFinancialDiscrepancies(text:string):string[]{
+  const discrepancy=/tidak\s+sesuai|tidak\s+diulang|tidak\s+dilakukan|tanpa\s+(?:survei|survey|verifikasi)|pengurangan\s+provisi|menyimpang|selisih|berbeda|belum\s+lengkap|tidak\s+lengkap|pemalsuan|palsu|anomali|temuan|data\s+tidak\s+benar/i;
+  const finance=/kredit|pinjaman|utang|piutang|debitur|kreditur|angsuran|pelunasan|agunan|jaminan|fidusia|hak\s+tanggungan|dijaminkan|diagunkan|bpkb|rekening|transfer|pembayaran|pencairan|taksasi|appraisal|bank|bpr/i;
+  const financeProcedure=/survei|survey|dokumen\s+administrasi|kelengkapan|analisa\s+kredit|analisis\s+kredit|\b5c\b|sop|verifikasi|lembar\s+fiat|approval|persetujuan|provisi|plafond|repayment\s+capacity|kepatuhan/i;
+  // Called only after a strong financial core has been established. Operational
+  // deviations may therefore be material even when the sentence itself omits
+  // the word "kredit" (e.g. "survei tidak diulang" / "dokumen belum lengkap").
+  return uniq(sentenceLikeSegments(text).filter(x=>discrepancy.test(x)&&(finance.test(x)||financeProcedure.test(x)))).slice(0,12);
+}
+
+function buildFinancialSignalProfile(text:string):FinancialSignalProfile{
+  const positiveText=positiveFinancialText(text);
+  const collateral=matchedSnippets(positiveText,/agunan|jaminan|dijaminkan|diagunkan|fidusia|hak\s+tanggungan|bpkb|collateral|nilai\s+taksasi|sertifikat[^.;]{0,100}(?:agunan|jaminan|hak\s+tanggungan)|(?:agunan|jaminan)[^.;]{0,100}sertifikat/gi,10);
+  const creditRelationship=matchedSnippets(positiveText,/\b(?:kredit|pinjaman|fasilitas\s+kredit|perjanjian\s+kredit|pembiayaan)\b/gi,10);
+  const accountRecords=matchedSnippets(positiveText,/ledger|buku\s+besar|jurnal\s+akuntansi|rekening\s+koran|mutasi\s+rekening|general\s+ledger/gi,8);
+  const strongFinanceCore=collateral.length>0||creditRelationship.length>0||accountRecords.length>0||/transaksi\s+keuangan|aliran\s+dana|rekening\s+bank/i.test(positiveText);
+  const repayment=strongFinanceCore?matchedSnippets(positiveText,/angsuran|pelunasan|lunas|jatuh\s+tempo|repayment|kemampuan\s+bayar|kredit\s+macet/gi,10):[];
+  const paymentFlow=strongFinanceCore?matchedSnippets(positiveText,/transfer|pencairan|pembayaran|bukti\s+bayar|bukti\s+pembayaran|rekening\s+koran|mutasi\s+rekening|aliran\s+dana/gi,10):[];
+  const valuation=strongFinanceCore?matchedSnippets(positiveText,/nilai\s+taksasi|taksasi|appraisal|penilaian\s+agunan|nilai\s+jaminan/gi,8):[];
+  const personalGain=strongFinanceCore?matchedSnippets(positiveText,/keuntungan\s+pribadi|personal\s+gain|kickback|fee\s+pribadi|komisi[^.;]{0,60}(?:pribadi|diterima)|aliran\s+dana[^.;]{0,80}(?:kepada|ke)\s+(?:pengambil\s+keputusan|pejabat|direktur|pengurus)/gi,8):[];
+  const discrepancies=strongFinanceCore?contextualFinancialDiscrepancies(positiveText):[];
+  const active=strongFinanceCore;
+  const amounts=active?moneyTerms(positiveText):[];
+  const review_questions:string[]=[];
+  const outputs:string[]=[];
+  const labels:string[]=[];
+
+  if(creditRelationship.length){
+    labels.push('hubungan kredit/pinjaman');
+    outputs.push('Pemetaan hubungan kredit/pinjaman');
+    review_questions.push('Apa dasar hubungan kredit/pinjaman, siapa para pihaknya, dan dokumen apa yang membuktikan pencairan serta kewajiban pembayaran?');
+  }
+  if(collateral.length){
+    labels.push('agunan/jaminan');
+    outputs.push('Audit kewenangan dan pengikatan agunan');
+    review_questions.push('Apakah objek yang disebut sebagai agunan/jaminan benar dapat dijaminkan oleh pihak tersebut, dan dokumen apa yang membuktikan kewenangan serta pengikatannya?');
+  }
+  if(repayment.length){
+    labels.push('angsuran/pelunasan');
+    outputs.push('Rekonsiliasi kewajiban dan pembayaran kembali');
+    review_questions.push('Apa kewajiban yang telah jatuh tempo, pembayaran apa yang benar-benar telah dilakukan, dan bukti primer apa yang merekonsiliasikannya?');
+  }
+  if(paymentFlow.length){
+    labels.push('pembayaran/aliran dana');
+    outputs.push('Rekonsiliasi pembayaran/aliran dana');
+    review_questions.push('Apakah pembayaran atau transfer yang disebut dapat ditelusuri ke bukti transaksi dan pihak penerima yang benar?');
+  }
+  if(valuation.length){
+    labels.push('taksasi/appraisal');
+    outputs.push('Verifikasi nilai taksasi/appraisal');
+    review_questions.push('Apakah nilai taksasi/appraisal berasal dari penilaian yang sah dan relevan pada tanggal material perkara?');
+  }
+  if(accountRecords.length){
+    labels.push('catatan rekening/ledger');
+    outputs.push('Rekonsiliasi catatan rekening/ledger');
+    review_questions.push('Apakah catatan rekening/ledger yang disebut konsisten dengan transaksi dan saldo yang dipersoalkan?');
+  }
+  if(personalGain.length){
+    labels.push('manfaat pribadi');
+    outputs.push('Penelusuran manfaat pribadi');
+    review_questions.push('Apakah ada bukti langsung aliran manfaat pribadi kepada pengambil keputusan atau pihak terkait, dan bagaimana atribusinya?');
+  }
+  if(discrepancies.length){
+    labels.push('ketidaksesuaian finansial/agunan');
+    outputs.push('Uji ketidaksesuaian finansial/agunan');
+    review_questions.push('Ketidaksesuaian mana yang benar-benar berkaitan dengan hubungan keuangan/agunan, dan bukti primer apa yang mengonfirmasi atau membantahnya?');
+  }
+  if(amounts.length){
+    outputs.push('Daftar nominal yang terkait konteks finansial');
+    review_questions.push('Nominal mana yang merupakan pokok kewajiban, pembayaran, nilai agunan, atau kerugian; dan jangan mencampurkannya dengan biaya perkara atau nominal lain yang tidak terkait?');
+  }
+
+  return {
+    active, amounts, collateral, repayment, discrepancies, payment_flow:paymentFlow,
+    valuation, account_records:accountRecords, personal_gain:personalGain,
+    credit_relationship:creditRelationship, review_questions:uniq(review_questions),
+    outputs:uniq(outputs), detected_labels:uniq(labels),
+  };
+}
+
+function actorRoleText(a:any):string {
+  return `${clean(a?.actor)} ${arr(a?.roles).map(clean).join(' ')}`.toLowerCase();
+}
+
+function isExplicitWitnessCandidate(a:any):boolean {
+  const hay=actorRoleText(a);
+  if (/\bsaksi\b|saksi\s+fakta|saksi\s+ahli|expert|ahli\s+(?:forensik|pidana|perdata|pertanahan|kedokteran|akuntansi|digital)/i.test(hay)) return true;
+  if (/notaris|ppat|pejabat\s+pembuat\s+akta|pegawai\s+kua|petugas\s+bpn|kantor\s+pertanahan|penyidik|polisi|jaksa|panitera/i.test(hay)) return true;
   return false;
+}
+
+function isOperationalFactWitnessCandidate(a:any):boolean {
+  const hay=actorRoleText(a);
+  // Material operational roles can be fact witnesses even when the source does
+  // not literally label them "saksi". Keep this narrow: require a concrete
+  // process/verification role, not merely corporate seniority or party status.
+  return /kabag|kepala\s+bagian|tim\s+kredit|account\s+officer|analis(?:is)?\s+kredit|surveyor|petugas\s+survei|staf\s+kredit|legal|compliance|kepatuhan|spi|audit(?:or)?\s+internal|pemasaran/i.test(hay);
+}
+
+function isPartyCounselOrRepresentativeOnly(a:any):boolean {
+  const hay=actorRoleText(a);
+  const excluded=/\b(?:penggugat|tergugat|pemohon|termohon|penggugat\s+rekonvensi|tergugat\s+rekonvensi|pemberi\s+kuasa|penerima\s+kuasa|kuasa\s+hukum|advokat|pengacara|klien|janda|duda|suami|istri|ahli\s+waris)\b/i.test(hay);
+  return excluded && !isExplicitWitnessCandidate(a);
+}
+
+function hasFormalAuthorityRole(a:any):boolean {
+  const hay=actorRoleText(a);
+  return /direktur|komisaris|pengurus|ketua|sekretaris|bendahara|pejabat|notaris|ppat|pemberi\s+kuasa|penerima\s+kuasa|kuasa\s+hukum|advokat|wali|kurator|likuidator|penyidik|jaksa|bpn|kantor\s+pertanahan/i.test(hay);
+}
+
+
+function authorityQuestionsForActor(a:any):{authority_question:string;operational_duty_question:string;verification:string}{
+  const hay=actorRoleText(a);
+  if(/pemberi\s+kuasa|penerima\s+kuasa|kuasa\s+hukum|advokat|pengacara/.test(hay)){
+    return {
+      authority_question:'Apa dasar dan ruang lingkup kuasa/representasi aktor ini, tindakan apa yang secara formil dicakup, dan adakah tindakan yang melampaui mandat?',
+      operational_duty_question:'Tindakan prosedural apa yang boleh dilakukan berdasarkan kuasa yang ada, dan dokumen apa yang harus ditandatangani atau dikonfirmasi oleh pemberi kuasa sendiri?',
+      verification:'Cocokkan dengan surat kuasa, identitas pihak, tanggal, lingkup tindakan, tanda tangan, dan ketentuan formil yang relevan.',
+    };
+  }
+  if(/notaris|ppat|bpn|kantor\s+pertanahan|pejabat/.test(hay)){
+    return {
+      authority_question:'Apa kewenangan jabatan aktor ini terhadap tindakan/dokumen yang dipersoalkan dan apa batas kewenangan tersebut pada tempus perkara?',
+      operational_duty_question:'Prosedur penerbitan, pemeriksaan, pencatatan, atau verifikasi apa yang wajib dilakukan oleh aktor ini sendiri atau unit terkait?',
+      verification:'Cocokkan dengan dasar kewenangan jabatan, arsip/dokumen penerbitan, prosedur resmi, dan catatan tindakan yang benar-benar dilakukan.',
+    };
+  }
+  return {
+    authority_question:'Apa sumber kewenangan formal aktor ini, batas kewenangannya, dan keputusan apa yang memang menjadi tanggung jawabnya?',
+    operational_duty_question:'Tindakan teknis apa yang wajib dilakukan sendiri, dapat didelegasikan, atau harus diverifikasi oleh unit/aktor lain?',
+    verification:'Cocokkan dengan instrumen kewenangan, pembagian tugas, dokumen persetujuan, dan bukti tindakan aktual.',
+  };
 }
 
 // ---------- Witness classification ----------
@@ -268,6 +438,11 @@ function classifyWitness(actor: string, roles: string[]): { category: WitnessCat
 
 function buildWitnessTargets(actorMatrix: any[], orientation: LawyerOrientation): WitnessPlanItem[] {
   return arr(actorMatrix)
+    // High-precision witness policy: an actor is not a witness merely because
+    // they appear in the actor matrix. Parties, counsel, representatives and
+    // family-status labels are excluded unless the source explicitly identifies
+    // a witness/expert/custodian/procedural role.
+    .filter((a:any)=>(isExplicitWitnessCandidate(a) || isOperationalFactWitnessCandidate(a)) && !isPartyCounselOrRepresentativeOnly(a))
     .slice(0, 12)
     .map((a: any) => {
       const roles = arr(a?.roles).map(clean).filter(Boolean);
@@ -319,8 +494,8 @@ function buildCaseTheoryCandidates(
   const out: string[] = [];
   const orientationTheory: Record<LawyerOrientation, string> = {
     CRIMINAL_DEFENSE: 'Hipotesis: konstruksi pembelaan terkuat adalah menyerang unsur subjektif/intent atau menempatkan tindakan sebagai pelaksanaan kewenangan jabatan yang sah.',
-    CIVIL_PLAINTIFF: 'Hipotesis: konstruksi gugatan terkuat adalah membuktikan hubungan kontraktual/PMH dan kausalitas langsung terhadap kerugian yang dapat dinilai.',
-    CIVIL_DEFENSE: 'Hipotesis: konstruksi pembelaan terkuat adalah mematahkan salah satu unsur gugatan (hubungan hukum, wanprestasi, kerugian, atau kausalitas).',
+    CIVIL_PLAINTIFF: 'Hipotesis: konstruksi gugatan harus mengikuti hubungan hukum dan isu material yang benar-benar terdeteksi, lalu menghubungkan tindakan, hak yang dilanggar, bukti, akibat, dan remedy tanpa memaksakan wanprestasi atau PMH bila basisnya tidak ada.',
+    CIVIL_DEFENSE: 'Hipotesis: konstruksi pembelaan harus menargetkan unsur gugatan yang benar-benar didalilkan dan didukung bukti; jangan mengasumsikan wanprestasi, PMH, atau kerugian bila tidak muncul dari materi perkara.',
     ADMINISTRATIVE_RESPONSE: 'Hipotesis: konstruksi respons terkuat adalah mempersoalkan kewenangan, prosedur, atau tempus keputusan administratif.',
     GENERAL_COUNSEL_REVIEW: 'Hipotesis: konstruksi utama belum final; perlu pemetaan hubungan hukum dan kualifikasi sebelum memilih satu jalur.',
   };
@@ -329,7 +504,10 @@ function buildCaseTheoryCandidates(
   if (proceduralStage === 'INVESTIGATION') {
     out.push('Hipotesis: pendampingan pemeriksaan lebih tepat daripada penyusunan pledoi pada tahap ini.');
   } else if (proceduralStage === 'PLEADING') {
-    out.push('Hipotesis: strategi pembelaan/pledoi diarahkan pada cacat formil dan/atau peniadaan unsur materiil.');
+    if (orientation === 'CRIMINAL_DEFENSE') out.push('Hipotesis: strategi pleading pidana harus mengikuti tahap dan dakwaan yang nyata; uji cacat formil dan unsur materiil tanpa mendahului agenda persidangan.');
+    else if (orientation === 'CIVIL_PLAINTIFF') out.push('Hipotesis: gugatan/replik harus mempertahankan teori perkara yang konsisten dengan fakta, bukti, petitum, dan norma yang benar-benar terverifikasi.');
+    else if (orientation === 'CIVIL_DEFENSE') out.push('Hipotesis: jawaban/duplik harus menanggapi dalil lawan per unsur, dengan bukti tandingan dan keberatan formil hanya jika memang ada basisnya.');
+    else out.push('Hipotesis: dokumen pleading harus mengikuti posisi pihak dan isu material yang benar-benar terdeteksi.');
   } else if (proceduralStage === 'PRE_LITIGATION') {
     out.push('Hipotesis: upaya non-litigasi (somasi/mediasi) dapat mengubah posisi negosiasi sebelum perkara diajukan.');
   }
@@ -389,7 +567,7 @@ export function buildLawyerWorkflow(input: {
 }): LawyerWorkflowResult {
   const text = String(input.text || '');
   const { orientation, side, confidence } = orientationFrom(input.sourceRole, text);
-  const proceduralStage = detectProceduralStage(input.sourceRole, text);
+  const proceduralStage = detectProceduralStage(input.sourceRole, text, input.title);
   const facts = arr(input.evidence?.textual_facts);
   const claims = arr(input.evidence?.party_claims);
   const adverse = arr(input.adverseEvidence);
@@ -398,14 +576,12 @@ export function buildLawyerWorkflow(input: {
   const timeline = arr(input.verifiedTimeline);
   const actors = arr(input.actorMatrix);
   const laws = arr(input.applicableLaw);
+  const proceduralAuthorityReady = hasStageProceduralAuthority(proceduralStage, laws);
 
-  const collateral = matchedSnippets(text, /agunan|jaminan|fidusia|bpkb|sertifikat|collateral|nilai\s+taksasi/gi, 10);
-  const repayment = matchedSnippets(text, /angsuran|pelunasan|lunas|jatuh\s+tempo|repayment|kemampuan\s+bayar|kredit\s+macet/gi, 10);
-  const discrepancy = matchedSnippets(
-    text,
-    /tidak\s+sesuai|menyimpang|selisih|berbeda|tanpa\s+survei|belum\s+lengkap|tidak\s+lengkap|pemalsuan|palsu|anomali|temuan/gi,
-    12,
-  );
+  const financialProfile = buildFinancialSignalProfile(text);
+  const collateral = financialProfile.collateral;
+  const repayment = financialProfile.repayment;
+  const discrepancy = financialProfile.discrepancies;
   const docs = uniq(
     (
       text.match(
@@ -414,7 +590,7 @@ export function buildLawyerWorkflow(input: {
     ).map(clean),
   ).slice(0, 24);
 
-  const financialActive = hasFinancialContent(text, collateral, repayment, discrepancy);
+  const financialActive = financialProfile.active;
 
   const allegation_response_matrix: AllegationResponseRow[] = issues.slice(0, 12).map((x: any) => {
     const issue = clean(x?.issue) || 'Isu belum bernama';
@@ -444,25 +620,33 @@ export function buildLawyerWorkflow(input: {
     };
   });
 
-  const authority_duty_matrix = actors.slice(0, 12).map((a: any) => ({
+  const representationDisputed=/surat\s+kuasa[^.;]{0,120}(?:tidak\s+sah|cacat|dipersoalkan|dibantah)|melampaui\s+(?:batas\s+)?kuasa|tanpa\s+kuasa|penerima\s+kuasa[^.;]{0,100}tidak\s+berwenang/i.test(text);
+  const authorityActors=actors.filter((a:any)=>{
+    if(!hasFormalAuthorityRole(a)) return false;
+    const hay=actorRoleText(a);
+    const representative=/pemberi\s+kuasa|penerima\s+kuasa|kuasa\s+hukum|advokat|pengacara/.test(hay);
+    return !representative || representationDisputed;
+  }).slice(0,12);
+  const authority_duty_matrix = authorityActors.map((a: any) => ({
     actor: clean(a?.actor) || 'Aktor belum bernama',
     roles: arr(a?.roles).map(clean).filter(Boolean),
-    authority_question:
-      'Apa sumber kewenangan formal aktor ini, batas kewenangannya, dan keputusan apa yang memang menjadi tanggung jawabnya?',
-    operational_duty_question:
-      'Tindakan teknis apa yang wajib dilakukan sendiri, dapat didelegasikan, atau harus diverifikasi oleh unit/aktor lain?',
-    verification: 'Cocokkan dengan SOP, SK kewenangan, uraian jabatan, dokumen persetujuan, dan keterangan saksi.',
+    ...authorityQuestionsForActor(a),
   }));
+  const authorityRoleText=authorityActors.map(actorRoleText).join(' ');
+  const managerialAuthority=/direktur|komisaris|pengurus|ketua|sekretaris|bendahara|manajer|kepala/.test(authorityRoleText);
+  const representationAuthority=/pemberi\s+kuasa|penerima\s+kuasa|kuasa\s+hukum|advokat|pengacara/.test(authorityRoleText);
 
   const expert_domains: string[] = [];
-  if (/kredit|bank|bpr|agunan|fidusia|loan|ldr|5c/i.test(text)) expert_domains.push('Perbankan / manajemen risiko kredit');
-  if (/korupsi|tipikor|pidana|tersangka|terdakwa|mens\s+rea/i.test(text)) expert_domains.push('Hukum pidana / tindak pidana korupsi');
-  if (/akuntansi|kerugian\s+(?:negara|keuangan)|audit|laporan\s+keuangan/i.test(text))
+  const trueCreditContext=/kredit|pinjaman|debitur|kreditur|fasilitas\s+kredit|perjanjian\s+kredit|pembiayaan|angsuran|pelunasan/i.test(text);
+  if (trueCreditContext) expert_domains.push('Perbankan / hubungan kredit');
+  if (/korupsi|tipikor|tersangka|terdakwa|mens\s+rea/i.test(text)) expert_domains.push('Hukum pidana / tindak pidana korupsi');
+  if (/akuntansi|kerugian\s+(?:negara|keuangan)|audit\s+keuangan|laporan\s+keuangan/i.test(text))
     expert_domains.push('Akuntansi forensik / kerugian keuangan');
-  if (/fidusia|agunan|jaminan/i.test(text)) expert_domains.push('Jaminan kebendaan / fidusia');
+  if (/fidusia|hak\s+tanggungan|agunan|jaminan/i.test(text)) expert_domains.push('Jaminan kebendaan');
 
   // ---- Stages ----
-  const draftingStatus = draftingStageStatus(proceduralStage, issues.length);
+  const witnessTargets=buildWitnessTargets(actors, orientation);
+  const draftingStatus = draftingStageStatus(proceduralStage, issues.length, proceduralAuthorityReady);
   const stages: LawyerWorkflowStage[] = [
     {
       id: 'case-role',
@@ -499,21 +683,29 @@ export function buildLawyerWorkflow(input: {
     {
       id: 'authority-duty',
       label: 'Examining Authority & Operational Duties',
-      objective: 'Bedakan keputusan manajerial, kewajiban teknis, delegasi, approval chain, dan tanggung jawab personal.',
-      status: actors.length >= 2 ? 'READY' : 'PARTIAL',
-      evidence_basis: [`actors=${actors.length}`],
-      outputs: ['Authority-duty matrix', 'Approval-chain questions', 'Delegation verification'],
+      objective: representationAuthority && !managerialAuthority
+        ? 'Uji hanya ruang lingkup kuasa/representasi dan kewenangan prosedural yang benar-benar terdeteksi.'
+        : managerialAuthority
+          ? 'Uji kewenangan formal, pembagian tugas, delegasi, dan approval chain yang benar-benar relevan dengan aktor manajerial/organisasi.'
+          : 'Uji dasar kewenangan formal aktor yang memang mempunyai fungsi jabatan atau representasi.',
+      status: authorityActors.length ? 'READY' : 'PARTIAL',
+      evidence_basis: [`authority_actors=${authorityActors.length}`, `all_actors=${actors.length}`],
+      outputs: authorityActors.length
+        ? ['Authority-duty matrix', ...(managerialAuthority?['Delegation/approval verification']:[]), ...(representationAuthority?['Scope-of-authority verification']:[])]
+        : ['Authority-duty module intentionally limited — no formal-authority actor detected.'],
     },
     {
       id: 'financial-collateral',
       label: 'Evaluating Financial & Collateral Data',
-      objective: 'Uji nominal, aliran dana, repayment, agunan, taksasi, discrepancy, dan kemungkinan personal gain.',
+      objective: financialActive
+        ? `Uji hanya unsur keuangan/agunan yang terdeteksi: ${financialProfile.detected_labels.join(', ') || 'hubungan finansial'}.`
+        : 'Jangan menjalankan audit finansial/agunan tanpa hubungan keuangan yang nyata dalam sumber.',
       status: financialActive ? 'READY' : 'PARTIAL',
       evidence_basis: financialActive
-        ? [`amounts=${moneyTerms(text).length}`, `collateral=${collateral.length}`, `repayment=${repayment.length}`, `discrepancies=${discrepancy.length}`]
+        ? [`amounts=${financialProfile.amounts.length}`, `collateral=${collateral.length}`, `repayment=${repayment.length}`, `payment_flow=${financialProfile.payment_flow.length}`, `valuation=${financialProfile.valuation.length}`, `discrepancies=${discrepancy.length}`]
         : ['no-financial-content-detected'],
       outputs: financialActive
-        ? ['Financial figure list', 'Collateral/security audit', 'Repayment/discrepancy audit', 'Personal-gain inquiry']
+        ? financialProfile.outputs
         : ['Financial audit intentionally inactive — no financial/collateral content in source.'],
     },
     {
@@ -528,17 +720,19 @@ export function buildLawyerWorkflow(input: {
       id: 'witness-strategy',
       label: 'Planning Witness & Expert Strategy',
       objective: 'Tentukan saksi fakta, saksi meringankan/pendukung, ahli, tujuan pemeriksaan, dan tema pertanyaan.',
-      status: actors.length ? 'READY' : 'PARTIAL',
-      evidence_basis: [`witness_targets=${Math.min(12, actors.length)}`, `expert_domains=${expert_domains.length}`],
-      outputs: ['Witness map with category & caution', 'Question themes', 'Expert recommendation'],
+      status: witnessTargets.length || expert_domains.length ? 'READY' : 'PARTIAL',
+      evidence_basis: [`witness_targets=${witnessTargets.length}`, `all_actors=${actors.length}`, `expert_domains=${expert_domains.length}`],
+      outputs: witnessTargets.length || expert_domains.length
+        ? [...(witnessTargets.length?['Witness map with category & caution','Question themes']:[]), ...(expert_domains.length?['Expert recommendation']:[])]
+        : ['Witness/expert plan intentionally deferred — no explicit witness or expert need detected.'],
     },
     {
       id: 'drafting',
       label: 'Drafting Legal Response',
       objective: 'Turunkan hasil analisis menjadi dokumen litigasi/pendampingan yang sesuai tahap perkara.',
       status: draftingStatus,
-      evidence_basis: [`law_candidates=${laws.length}`, `issues=${issues.length}`, `procedural_stage=${proceduralStage}`, `procedural_drafting_status=${draftingStatus}`],
-      outputs: ['Chronology memo', 'Evidence map', 'Legal response/objection/defense outline', 'Witness question set'],
+      evidence_basis: [`law_candidates=${laws.length}`, `issues=${issues.length}`, `procedural_stage=${proceduralStage}`, `procedural_drafting_status=${draftingStatus}`, `procedural_authority=${proceduralAuthorityReady?'READY':'UNRESOLVED'}`],
+      outputs: ['Chronology memo', 'Evidence map', 'Legal response/objection/defense outline', ...(witnessTargets.length?['Witness question set']:[])],
     },
     {
       id: 'verification',
@@ -581,13 +775,15 @@ export function buildLawyerWorkflow(input: {
         ? 'Jangan otomatis menyusun pledoi/eksepsi selama perkara masih pada tahap pendampingan pemeriksaan; tunggu tahap yang secara prosedural mendukung.'
         : `Catatan strategi bersifat internal. ${stageDraftGuard(proceduralStage)}`,
     },
-    {
+    ...(witnessTargets.length || expert_domains.length ? [{
       document: 'Daftar pertanyaan saksi & rencana ahli',
-      purpose: 'Menguji pembagian kewenangan, pengetahuan langsung, dokumen, dan unsur material.',
-      priority: 'P2',
-      depends_on: ['witness map', 'authority-duty matrix'],
-      stage_guard: 'Sesuaikan dengan tahap pemeriksaan saksi di persidangan; jangan membocorkan strategi ke pihak lawan.',
-    },
+      purpose: witnessTargets.length
+        ? 'Menguji pengetahuan langsung, dokumen, dan unsur material melalui saksi yang memang teridentifikasi.'
+        : 'Menetapkan kebutuhan ahli hanya pada bidang yang mempunyai basis faktual dalam sumber.',
+      priority: 'P2' as const,
+      depends_on: witnessTargets.length ? ['witness map', 'authority-duty matrix'] : ['expert need', 'verified issues'],
+      stage_guard: 'Sesuaikan dengan tahap pemeriksaan saksi/ahli; jangan membuat daftar saksi dari aktor yang hanya berstatus pihak atau kuasa.',
+    }] : []),
     {
       document: stageDraftDocument(orientation, proceduralStage),
       purpose: 'Mengubah hasil analisis menjadi dokumen yang tepat untuk posture/tahap prosedural yang terdeteksi.',
@@ -604,11 +800,11 @@ export function buildLawyerWorkflow(input: {
     'Kunci posisi klien, tahap perkara, dan target hasil sebelum memilih dokumen atau remedy.',
     'Bangun satu matriks aktor → tindakan → kewenangan → bukti → isu → unsur/norma.',
     'Pisahkan setiap tuduhan dari fakta yang benar-benar terverifikasi; tandai semua dalil yang masih claim-only.',
-    'Uji approval chain dan pembagian tugas teknis vs keputusan manajerial menggunakan SOP/SK/uraian jabatan.',
-    financialActive
-      ? 'Rekonsiliasi seluruh nominal, aliran dana, repayment, agunan, nilai taksasi, serta kemungkinan keuntungan pribadi.'
-      : 'Tidak ada unsur finansial yang perlu diaudit pada sumber ini; jangan memaksakan analisis kredit/agunan.',
-    'Siapkan saksi fakta, saksi pendukung/a de charge bila relevan, ahli, dan pertanyaan berbasis tujuan pembuktian.',
+    ...(managerialAuthority ? ['Uji hanya approval chain, delegasi, SOP/SK, dan pembagian tugas yang mempunyai aktor manajerial/organisasi serta tindakan material yang nyata.'] : []),
+    ...(representationAuthority && !managerialAuthority ? ['Verifikasi ruang lingkup kuasa/representasi hanya sejauh menjadi material terhadap tindakan prosedural atau kewenangan pihak.'] : []),
+    ...(financialActive ? financialProfile.review_questions.slice(0,4) : []),
+    ...(witnessTargets.length ? ['Siapkan pertanyaan hanya untuk saksi/pejabat penyimpan dokumen yang benar-benar teridentifikasi dan kaitkan setiap pertanyaan dengan proposisi yang hendak dibuktikan.'] : []),
+    ...(expert_domains.length ? [`Uji kebutuhan ahli hanya untuk bidang yang terdeteksi: ${uniq(expert_domains).join(', ')}.`] : []),
     'Verifikasi citation, status berlaku, tempus, dan bunyi pasal sebelum memasukkan rule ke pleading final.',
   ]);
 
@@ -620,24 +816,17 @@ export function buildLawyerWorkflow(input: {
     role_confidence: confidence,
     mandate_summary: `Analisis diarahkan sebagai ${orientation
       .replace(/_/g, ' ')
-      .toLowerCase()} pada tahap ${proceduralStage.replace(/_/g, ' ').toLowerCase()} dengan fokus pada posisi klien, matriks fakta-bukti, allegation/counter-case, kewenangan, pembuktian, saksi, dan drafting yang sesuai tahap perkara.`,
+      .toLowerCase()} pada tahap ${proceduralStage.replace(/_/g, ' ').toLowerCase()} dengan fokus pada posisi klien, matriks fakta-bukti, isu dan authority yang terikat pada bukti,${authorityActors.length?' kewenangan formal,':''}${financialActive?' unsur finansial/agunan yang benar-benar terdeteksi,':''}${witnessTargets.length?' saksi yang teridentifikasi,':''} serta drafting yang sesuai tahap perkara.`,
     stages,
     allegation_response_matrix,
     authority_duty_matrix,
     financial_collateral_audit: {
       active: financialActive,
-      amounts: moneyTerms(text),
+      amounts: financialProfile.amounts,
       collateral_terms: collateral,
       repayment_terms: repayment,
       discrepancy_terms: discrepancy,
-      review_questions: financialActive
-        ? [
-            'Apakah seluruh angka pada BAP/dokumen konsisten dengan perjanjian, ledger, appraisal, dan bukti pembayaran?',
-            'Apakah agunan benar ada, sah, terikat, dapat dieksekusi, dan nilainya relevan pada tempus yang diperiksa?',
-            'Apakah terdapat aliran manfaat langsung/tidak langsung kepada pengambil keputusan atau pihak terkait?',
-            'Apakah kerugian yang didalilkan actual, potential, recoverable, atau masih bergantung pada eksekusi/remedy lain?',
-          ]
-        : [],
+      review_questions: financialActive ? financialProfile.review_questions : [],
     },
     document_integrity_audit: {
       document_markers: docs,
@@ -649,7 +838,7 @@ export function buildLawyerWorkflow(input: {
       ],
     },
     witness_strategy: {
-      witness_targets: buildWitnessTargets(actors, orientation),
+      witness_targets: witnessTargets,
       expert_domains: uniq(expert_domains),
     },
     drafting_plan,

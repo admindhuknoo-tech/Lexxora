@@ -1,0 +1,27 @@
+--- a/public/lexicore.v6122.js
++++ b/public/lexicore.v6122.js
+@@ -75,14 +75,21 @@
+   const logo=document.querySelector('#busyOverlay .loader-logo');
+   if(bar){bar.classList.toggle('progress',mode==='progress');bar.style.setProperty('--busy-progress',safe+'%')}
+   if(ring){ring.style.setProperty('--busy-progress',String(safe));ring.style.setProperty('--busy-angle',(safe*3.6)+'deg');ring.classList.toggle('is-determinate',mode==='progress');ring.classList.toggle('is-indeterminate',mode!=='progress')}
+-  if(logo){logo.setAttribute('data-progress',Math.round(safe)+'%')}
++  if(logo){logo.setAttribute('data-progress',typeof formatBusyPercent==='function'?formatBusyPercent(safe):Math.round(safe)+'%')}
++}
++function formatBusyPercent(value){
++  const n=Math.max(0,Math.min(100,Number(value)||0));
++  // OCR spans only 28-44% of the whole pipeline. A decimal here exposes real
++  // worker progress instead of visually freezing for minutes on multi-page PDFs.
++  return (n>=28&&n<45&&Math.abs(n-Math.round(n))>=0.05?n.toFixed(1):String(Math.round(n)))+'%';
+ }
+ function setBusyProgress(percent,label,detail){
+   busyProgressMode=true;busyProgressValue=Math.max(0,Math.min(100,Number(percent)||0));
+   syncBusyVisual(busyProgressValue,'progress');
+-  busyElapsed.textContent=Math.round(busyProgressValue)+'%';
++  const pct=formatBusyPercent(busyProgressValue);
++  busyElapsed.textContent=pct;
+   if(label)busyTitle.textContent=label;if(detail)busyText.textContent=detail;
+-  if(label)processChipText.textContent=label+' · '+Math.round(busyProgressValue)+'%';
++  if(label)processChipText.textContent=label+' · '+pct;
+ }
+ function resetBusyProgress(){busyProgressMode=false;busyProgressValue=0;syncBusyVisual(0,'indeterminate')}
+ function setBusy(on,label='LexiCore sedang memproses'){

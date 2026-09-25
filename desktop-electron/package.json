@@ -1,0 +1,38 @@
+{
+  "name": "lexicore-desktop-v7",
+  "version": "7.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "pack:dir": "electron-builder --win dir",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "37.4.0",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "id.lexicore.desktop",
+    "productName": "LexiCore Desktop V7",
+    "asar": true,
+    "files": ["main.cjs", "preload.cjs", "package.json"],
+    "extraResources": [
+      { "from": "../.desktop-runtime/dist", "to": "app-runtime/dist", "filter": ["**/*"] },
+      { "from": "../.desktop-runtime/src", "to": "app-runtime/src", "filter": ["**/*"] },
+      { "from": "../.desktop-runtime/node_modules", "to": "app-runtime/node_modules", "filter": ["**/*"] },
+      { "from": "../.desktop-runtime/package.json", "to": "app-runtime/package.json" },
+      { "from": "../.desktop-runtime/ind.traineddata", "to": "app-runtime/ind.traineddata" }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "LexiCore-Desktop-Setup-v7.0.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "directories": { "output": "../dist/installer-electron" }
+  }
+}

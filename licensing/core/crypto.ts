@@ -61,26 +61,6 @@ export function verifyPayload(payload: unknown, signatureB64Url: string, publicK
   }
 }
 
-/** Encodes {payload, signature} as one paste-able activation key string. */
-export function encodeActivationKey(payload: unknown, signature: string): string {
-  const body = Buffer.from(JSON.stringify({ p: payload, s: signature }), 'utf8').toString('base64url');
-  // Grouped in 6-char blocks for readability when a customer reads it back over chat/WA.
-  const grouped = body.match(/.{1,6}/g)?.join('-') ?? body;
-  return `LC7-${grouped}`;
-}
-
-export function decodeActivationKey(key: string): { payload: unknown; signature: string } | null {
-  try {
-    const stripped = key.trim().replace(/^LC7-/, '').replace(/-/g, '');
-    const json = Buffer.from(stripped, 'base64url').toString('utf8');
-    const parsed = JSON.parse(json);
-    if (!parsed || typeof parsed !== 'object' || !('p' in parsed) || !('s' in parsed)) return null;
-    return { payload: parsed.p, signature: parsed.s };
-  } catch {
-    return null;
-  }
-}
-
 export function shortId(prefix: string): string {
   return `${prefix}-${randomBytes(5).toString('hex').toUpperCase()}`;
 }

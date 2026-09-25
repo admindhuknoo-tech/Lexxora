@@ -12,7 +12,10 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { generateAdminKeyPair } from '../core/crypto';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const { publicKeyPem, privateKeyPem } = generateAdminKeyPair();
 
@@ -24,7 +27,7 @@ console.log(privateKeyPem);
 const outDir = path.join(__dirname);
 const gitignore = path.join(outDir, '.gitignore');
 if (!fs.existsSync(gitignore)) {
-  fs.writeFileSync(gitignore, '.private-key.pem\n');
+  fs.writeFileSync(gitignore, '.private-key.pem\nissued-licenses/\n');
 }
 
 console.log(`\nReminder: this directory has a .gitignore for .private-key.pem — verify it's in place before committing.\n`);

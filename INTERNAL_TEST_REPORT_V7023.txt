@@ -1,0 +1,55 @@
+LEXICORE V7.0.2.3 — INTERNAL TEST REPORT
+Date: 2026-09-18
+
+TEST SCOPE
+Merged original LEXY.zip + V7.0.2.2, then applied V7.0.2.3 corrective changes.
+
+ACTUAL TEST RESULTS
+1. TypeScript full project: PASS
+   command: node node_modules/typescript/bin/tsc --noEmit
+
+2. V7.0.2.3 authority-funnel deterministic integration: 24/24 PASS
+   - no case-party hardcode
+   - no case-doctrine hardcode
+   - search decoration separated from relevance query
+   - official result context retained
+   - provider plan generic across Contract, Criminal, PHI, TUN, Land
+   - relevant JDIH MA product accepted
+   - relevant official decision accepted
+   - irrelevant judicial candidates rejected fail-closed
+   - JDIH MA and Putusan MA funnel counters exposed
+   - post-event judicial authority remains UNVERIFIED, not auto-rejected
+   - post-event legislation remains POTENTIALLY_INCOMPATIBLE
+
+3. End-to-end Case Analysis pipeline with deterministic mocked HTTP only: 7/7 PASS
+   - JDIH MA candidate reaches production retrieval output
+   - Putusan candidate reaches production retrieval output
+   - judicial authority survives issue binding when materially relevant
+   - judicial product appears in applicable_law / Section III candidate set
+   - decision appears in applicable_law / Section III candidate set
+   - professional verification wording remains mandatory
+
+4. Existing regression suite executed through TypeScript-compiled JS because the archived node_modules contains Windows esbuild and cannot run tsx on Linux:
+   V7.0.2 judicial retrieval: 21/21 PASS
+   query scheduling: 13/13 PASS
+   authority query: 17/17 PASS
+   topical policy: 17/17 PASS
+   canonical seed: 22/22 PASS
+   canonical authority: 16/16 PASS
+   canonical authority seed: 16/16 PASS
+   canonical authority contract: 19/19 PASS
+   canonical runtime shape: 5/5 PASS
+
+5. Performance predeploy: 16/16 PASS
+
+6. LIVE OFFICIAL PROVIDER CONNECTIVITY — NO MOCK
+   JDIH_BPK: FAIL / UNVERIFIED — EAI_AGAIN DNS
+   JDIH_MA: FAIL / UNVERIFIED — EAI_AGAIN DNS
+   PUTUSAN_MA: FAIL / UNVERIFIED — EAI_AGAIN DNS
+
+   This result is intentionally NOT marked PASS.
+   Root cause observed in this environment: DNS resolver cannot resolve the three official hostnames.
+   Release readiness requires rerunning scripts/audit-v7023-live-provider-connectivity.ts on the actual Windows deployment network.
+
+NOT RUN AS NATIVE TSX IN THIS LINUX AUDIT ENVIRONMENT
+The archived node_modules contains @esbuild/win32-x64. Therefore native `tsx` execution on Linux fails before the audit code runs. For deterministic integration/regression scripts, TypeScript was compiled with the project TypeScript compiler to temporary CommonJS JS and the generated JS was executed with Node. This limitation is recorded rather than hidden.

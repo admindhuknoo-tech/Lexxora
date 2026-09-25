@@ -10,7 +10,7 @@ const checks=[
   ['claim-first actor fallback remains claim', /LEGAL_CORRESPONDENCE[\s\S]{0,160}tagClaim/.test(reasoner)],
   ['exporter humanizes reference/adverse/anomaly tags', /REFERENSI\|BUKTI LAWAN\|ANOMALI/.test(exporter)],
   ['supporting tag is not FACT tag', !/supporting_evidence:supporting[\s\S]{0,220}tagFact\(/.test(reasoner)],
-  ['chronology heading does not claim all events are verified', /Kronologi Terpetakan \(Fakta\/Klaim\)/.test(exporter) && !/Kronologi Terverifikasi/.test(exporter)],
+  ['chronology heading does not claim all events are verified', /Kronologi Fakta dan Posisi Para Pihak/.test(exporter) && !/Kronologi Terverifikasi|Kronologi Terpetakan \(Fakta\/Klaim\)/.test(exporter)],
 ];
 let pass=0;
 for(const [name,ok] of checks){console.log(`${ok?'PASS':'FAIL'} | ${name}`); if(ok) pass++;}

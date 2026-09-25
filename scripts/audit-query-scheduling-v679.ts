@@ -2,6 +2,7 @@ declare const process: any;
 import fs from 'node:fs';
 import path from 'node:path';
 import { inferLegalContext, officialQueriesForContext } from '../server/legalOntology';
+import { buildAuthorityProviderPlan } from '../server/officialLawRetriever';
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -17,7 +18,8 @@ const retrieverSrc = fs.readFileSync(retrieverPath, 'utf8');
 check('1.1 phrase-aware decomposition installed', /function phraseAwareDecompose\s*\(/.test(ontologySrc));
 check('1.2 fair scheduler installed', /function scheduleQueryPlans\s*\(/.test(ontologySrc));
 check('1.3 total generated-query cap remains 20', /MAX_OFFICIAL_QUERIES\s*=\s*20/.test(ontologySrc));
-check('1.4 provider network cap remains 8', /input\.queries\.slice\(0,\s*8\)/.test(retrieverSrc));
+const providerPlanProbe=buildAuthorityProviderPlan(['a','b','c','d','e','f','g','h','i','j','k'],'hybrid');
+check('1.4 provider-aware network plan remains bounded <=10 with reserved judicial slots', providerPlanProbe.total_query_slots<=10 && providerPlanProbe.regulation_queries.length<=6 && providerPlanProbe.judicial_product_queries.length<=2 && providerPlanProbe.case_law_queries.length<=2, JSON.stringify(providerPlanProbe));
 
 const fixture = `
 Perjanjian jual beli tanah antara Agnes dan Irma dituangkan dalam PPJB.

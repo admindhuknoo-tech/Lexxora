@@ -1,0 +1,62 @@
+--- /home/claude/lexy_v8/server/forensicReasoner.ts	2026-09-21 14:55:55.000000000 +0000
++++ /home/claude/lexy_v8work/server/forensicReasoner.ts	2026-09-23 22:12:54.197799818 +0000
+@@ -173,9 +173,58 @@
+   });
+ }
+ 
++// A long BAP/court-document sentence routinely names several different
++// people or entities in the same breath (e.g. "...diperiksa sebagai
++// Tersangka ... oleh Perumda BPR Kota Blitar kepada Debitur Dewi
++// Mufarida...", or a multi-point answer "a. ...calon debitur..., b. ...,
++// c. ...menyampaikan kepada saya selaku Direktur"). statementMentionsActor
++// only proves the actor's name is present somewhere in the statement, not
++// that the status/role word in that statement is actually asserting
++// something about that actor rather than about a different name mentioned
++// in an earlier or later clause of the same run-on statement. A fixed
++// character-distance window is not reliable here because BAP sentences
++// pack many comma/period-separated clauses into a short span; instead,
++// require the actor's own name and the status/role cue to fall in the
++// SAME clause (split on comma/period/semicolon/colon), so a cue that
++// belongs to a different clause is never borrowed.
++function statementAssertsActorStatus(statement:string,actor:{actor:string;aliases?:string[]}):boolean{
++  const hay=clean(statement);
++  const names=uniq([actor.actor,...(actor.aliases||[])]).map(clean).filter(Boolean);
++  if(!names.length) return false;
++  const keywordRe=/\b(?:hak|kewajiban|berwenang|kuasa|mewakili|selaku|sebagai)\b/gi;
++  // "kepada"/"oleh" mark the party that follows as a recipient or as a
++  // different acting party than the clause's own subject, not as the one
++  // bearing a status/role word stated earlier in the same clause - e.g.
++  // "...diperiksa sebagai Tersangka ... oleh Perumda BPR Kota Blitar
++  // kepada Debitur Dewi Mufarida..." names two different parties in one
++  // unpunctuated clause without either of them being "sebagai Tersangka".
++  // A clause split alone does not catch this because BAP sentences often
++  // run many words together with no internal comma/period at all.
++  const objectPrepositionRe=/\b(?:kepada|oleh)\b/i;
++  const clauses=hay.split(/[.,;:]/);
++  return clauses.some(clause=>{
++    keywordRe.lastIndex=0;
++    const keywordIndexes:number[]=[];
++    let km:RegExpExecArray|null;
++    while((km=keywordRe.exec(clause))) keywordIndexes.push(km.index);
++    if(!keywordIndexes.length) return false;
++    return names.some(name=>{
++      const pattern=escapeRegex(name).replace(/\\\s+/g,'\\s+');
++      const nameRe=new RegExp(`(^|[^A-Za-zÀ-ÿ0-9])${pattern}(?=$|[^A-Za-zÀ-ÿ0-9])`,'i');
++      const nameMatch=nameRe.exec(clause);
++      if(!nameMatch) return false;
++      const nameIndex=(nameMatch.index||0)+(nameMatch[1]?nameMatch[1].length:0);
++      return keywordIndexes.some(kwIndex=>{
++        const start=Math.min(kwIndex,nameIndex),end=Math.max(kwIndex,nameIndex);
++        return !objectPrepositionRe.test(clause.slice(start,end));
++      });
++    });
++  });
++}
++
+ function actorStatus(evidence:EvidenceModel,actor:{actor:string;roles:string[];pages:number[];evidence_quotes:string[];aliases?:string[]}):string{
+   const same=evidence.statements.filter(s=>actor.pages.includes(s.page)&&statementMentionsActor(s.statement,actor)).slice(0,3);
+-  const explicit=same.find(s=>/\b(hak|kewajiban|berwenang|kuasa|mewakili|selaku|sebagai)\b/i.test(s.statement));
++  const explicit=same.find(s=>statementAssertsActorStatus(s.statement,actor));
+   return explicit
+     ? `Status/kapasitas yang tertulis perlu dibaca dari sumber: ${clip(explicit.statement,220)}`
+     : 'Hak, kewajiban, kapasitas, dan kewenangan tidak diinferensikan otomatis; tetapkan hanya dari dokumen sumber dan norma yang telah diverifikasi.';

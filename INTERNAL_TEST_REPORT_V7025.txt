@@ -1,0 +1,44 @@
+LEXICORE V7.0.2.5 - INTERNAL TEST REPORT
+Date: 2026-09-18
+Scope: exact regression reported after V7.0.2.4 where historical script audit-v7021-live-provider-connectivity.ts referenced removed OfficialProviderConnectivityProbe fields p.ok and p.status.
+
+REPRODUCTION BEFORE FIX
+A synthetic full repo was built from the original LEXY.zip, V7.0.2.4 was applied, and the exact historical V7.0.2.1 live audit script was restored.
+Result:
+- npm run lint: FAIL
+- 3 TypeScript errors reproduced exactly:
+  * Property 'ok' does not exist on type OfficialProviderConnectivityProbe (2 occurrences)
+  * Property 'status' does not exist on type OfficialProviderConnectivityProbe (1 occurrence)
+
+ROOT CAUSE
+The production connectivity contract had evolved to:
+- direct_ok
+- direct_status
+- direct_state
+- network_reachable
+- usable
+- final_state
+but the historical V7.0.2.1 audit remained compiled by tsconfig and still referenced the removed fields p.ok/p.status.
+
+CORRECTIVE
+- Updated audit-v7021-live-provider-connectivity.ts to the V7.0.2.4 contract.
+- Connectivity semantics now use network_reachable.
+- Retrieval-path semantics use usable/final_state.
+- HTTP 401/403/429 is not mislabeled as DNS/firewall failure.
+- Added audit-v7025-probe-contract-compatibility.mjs to guard historical audit scripts against future interface drift.
+
+TESTS ACTUALLY RUN AFTER FIX
+1. npm run lint / tsc --noEmit: PASS (zero errors)
+2. audit-v7025-probe-contract-compatibility.mjs: 12/12 PASS
+3. audit-v6122-performance-predeploy.mjs: 16/16 PASS
+
+TESTS NOT CLAIMED AS RUN IN THIS ENVIRONMENT
+- TSX runtime audits were NOT executed here because the uploaded project node_modules contains @esbuild/win32-x64, while the audit environment is Linux. Running tsx produces the explicit esbuild cross-platform binary error.
+- Live provider connectivity was NOT reclassified or mocked in this corrective. The user's prior real Windows result remains authoritative for live access: BPK 200; JDIH MA 403; PUTUSAN MA 403 under V7.0.2.3. V7.0.2.4 semantics should classify 403 as REACHABLE_BLOCKED and attempt fallback; VERIFY_V7025.bat delegates to VERIFY_V7024.bat for the real Windows live result.
+
+STATUS
+- Exact TypeScript regression: FIXED and reproduced-before/fixed-after.
+- Full TypeScript compile gate: PASS in synthesized integrated repo.
+- Static compatibility guard: PASS.
+- Performance regression guard: PASS.
+- Live provider usability: MUST be proven on user's Windows by VERIFY_V7025.bat; no PASS claim is made here.

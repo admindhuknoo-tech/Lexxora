@@ -27,11 +27,12 @@ const REQUIRED_SIGNATURES: Array<{ label: string; re: RegExp }> = [
   { label: '__test__ export',                re: /export const __test__/ },
   { label: 'V6.7.7 issueQueries removal preserved', re: /Query generation is delegated entirely to the ontology layer/ },
   { label: 'V6.7.7 query cap 20 preserved', re: /return uniq\(queries\)\.slice\(0, 20\)/ },
-  { label: 'network search cap 8 preserved', re: /input\.queries\.slice\(0,8\)/ },
 ];
 for (const sig of REQUIRED_SIGNATURES) check(`1.y static: production must contain ${sig.label}`, sig.re.test(src));
 
-const { profileQueryForTopicalPolicy, topicalCandidateAccepts } = __test__;
+const { profileQueryForTopicalPolicy, topicalCandidateAccepts, buildAuthorityProviderPlan } = __test__;
+const networkPlan=buildAuthorityProviderPlan(['a','b','c','d','e','f','g','h','i','j','k'],'hybrid');
+check('1.y runtime: provider-aware network plan <=10 with judicial reservation',networkPlan.total_query_slots<=10&&networkPlan.regulation_queries.length<=6&&networkPlan.judicial_product_queries.length<=2&&networkPlan.case_law_queries.length<=2,JSON.stringify(networkPlan));
 
 {
   const p = profileQueryForTopicalPolicy('wanprestasi somasi ganti rugi');

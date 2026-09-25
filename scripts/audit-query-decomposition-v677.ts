@@ -20,8 +20,8 @@ const oldLongAgraria = 'peralihan hak karena jual beli PPJB AJB kewenangan menga
 const ontology = officialQueriesForContext(text);
 check('ontology query count <= 20', ontology.length <= 20, `count=${ontology.length}`);
 check('conditional long query decomposed', !ontology.includes(oldLongConditional));
-check('conditional window #1 present', ontology.includes('syarat perjanjian prestasi bersyarat'));
-check('conditional window #2 present', ontology.includes('prestasi bersyarat pembayaran bertahap'));
+check('conditional semantic query preserved', ontology.includes('syarat perjanjian prestasi bersyarat pembayaran bertahap'));
+check('conditional query remains token-bounded', ontology.filter(q=>q.includes('syarat perjanjian')).every(q=>q.split(/\s+/).filter(Boolean).length<=6));
 check('old agraria parent query not emitted', !ontology.includes(oldLongAgraria));
 check('ontology contains agraria-decomposed material', ontology.some(q => /peralihan|sertifikat|agraria|pertanahan/.test(q)), ontology.filter(q => /peralihan|sertifikat|agraria|pertanahan/.test(q)).join(' || '));
 
@@ -36,7 +36,7 @@ const built = buildOfficialLawQueries({
 });
 check('build query count <= 20', built.length <= 20, `count=${built.length}`);
 check('build does not re-inject issueQueries parent', !built.includes(oldLongConditional) && !built.includes(oldLongAgraria));
-check('build preserves ontology decomposition', built.includes('syarat perjanjian prestasi bersyarat') && built.includes('prestasi bersyarat pembayaran bertahap'));
+check('build preserves ontology semantic query', built.includes('syarat perjanjian prestasi bersyarat pembayaran bertahap'));
 
 const withCitation = buildOfficialLawQueries({
   title: 'Analisis Kasus',
@@ -47,7 +47,7 @@ const withCitation = buildOfficialLawQueries({
 check('explicit citation remains first-class query', withCitation[0] === 'UU Nomor 5 Tahun 1960', `first=${withCitation[0]}`);
 
 const retrieverSource = readFileSync(new URL('../server/officialLawRetriever.ts', import.meta.url), 'utf8');
-check('network execution cap remains 8', /input\.queries\.slice\(0,8\)/.test(retrieverSource));
+check('provider-aware network budget installed', /buildAuthorityProviderPlan\s*\(/.test(retrieverSource) && /regulationBudget=6/.test(retrieverSource) && /judicialProductBudget=2/.test(retrieverSource) && /caseLawBudget=2/.test(retrieverSource));
 check('legacy issueQueries branch removed', !/const\s+issueQueries\s*=/.test(retrieverSource));
 
 console.log(`\n${pass}/${pass + fail} V6.7.7 checks PASS`);

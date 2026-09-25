@@ -1,0 +1,25 @@
+LEXICORE V7.0.2.7 INTERNAL TEST REPORT
+
+Basis test:
+- full LEXY.zip source
+- V7.0.2.6 officialLawRetriever applied
+- V7.0.2.7 changes applied on production source
+
+TRUE STATIC/COMPILE:
+PASS - npm run lint / tsc --noEmit (0 TypeScript errors)
+PASS - performance-predeploy-v6122: 16/16
+
+RUNTIME AGAINST EMITTED PRODUCTION MODULE (compiled by TypeScript to CommonJS; no parser reimplementation):
+PASS - V7.0.2.7 official aggregator: 9/9
+PASS - V7.0.2.6 fallback parser regression: 9/9
+PASS - V7.0.2.4 provider-access semantics regression: 11/11
+
+LIVE EXTERNAL PROVIDER TEST FROM THIS LINUX ENVIRONMENT:
+UNVERIFIED - production probe did not complete before environment timeout.
+No live PASS is claimed.
+Windows user must run VERIFY_V7027.bat. Step [6/6] is the release gate.
+
+Selected design:
+Direct MA -> official JDIHN aggregator -> DDG Lite -> DDG HTML -> Bing.
+Only positive .go.id discovery is cached for 24h in-process.
+JDIHN candidates remain SECONDARY_OFFICIAL and require professional verification.

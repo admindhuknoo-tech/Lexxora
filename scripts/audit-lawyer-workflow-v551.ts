@@ -15,7 +15,7 @@ ck('procedural stage investigation',r.procedural_stage==='INVESTIGATION',r.proce
 ck('10 workflow stages',r.stages.length===10,String(r.stages.length));
 ck('allegation matrix issue aligned',r.allegation_response_matrix.length===issues.length,String(r.allegation_response_matrix.length));
 ck('counter evidence relevance selective',r.allegation_response_matrix.some(x=>x.counter_material.length>0),'');
-ck('authority matrix',r.authority_duty_matrix.length>=4,String(r.authority_duty_matrix.length));
+ck('authority matrix limited to actors with formal authority',r.authority_duty_matrix.some(x=>/Direktur/i.test(x.actor))&&r.authority_duty_matrix.some(x=>/Penyidik/i.test(x.actor)),r.authority_duty_matrix.map(x=>x.actor).join('|'));
 ck('financial audit active',r.financial_collateral_audit.active===true,'');
 ck('amount extracted',r.financial_collateral_audit.amounts.some(x=>x.includes('255')),'' );
 ck('collateral extracted',r.financial_collateral_audit.collateral_terms.length>0,'');

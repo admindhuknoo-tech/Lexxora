@@ -1,0 +1,889 @@
+--- /mnt/data/lexy_closure/base/.desktop-runtime/dist/lexicore.v6122.js	2026-09-18 09:23:32.000000000 +0000
++++ /mnt/data/lexy_closure/work/.desktop-runtime/dist/lexicore.v6122.js	2026-09-20 23:03:27.000000000 +0000
+@@ -874,7 +874,7 @@
+   const matrix=(headers,rows)=>rows.length?`<div class="lc4-table-wrap"><table class="lc4-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="lc4-muted">Belum terpetakan.</p>';
+   const grounding=`<section class="lc4-section"><h3>Grounding · Fakta, Klaim & Anomali</h3><div class="lc4-grid"><div><b>Fakta Tekstual</b>${list(buckets.textual_facts)}</div><div><b>Dalil / Klaim Pihak</b>${list(buckets.party_claims)}</div></div><div style="margin-top:12px"><b>Anomali / Kontradiksi</b>${list(buckets.anomalies)}</div></section>`;
+   const actorTable=`<section class="lc4-section"><h3>Matriks Aktor & Status Hukum</h3>${matrix(['Aktor','Status Terbukti','Hak/Kewajiban Eksplisit','Evidence Tag'],actors.map(a=>[esc(a.actor||'-'),esc(a.proven_status||'-'),esc(a.explicit_rights_obligations||'-'),esc(a.evidence_tag||'-')]))}</section>`;
+-  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Terverifikasi</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
++  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Fakta dan Posisi Para Pihak</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
+   const gapsHtml=`<section class="lc4-section"><h3>Bedah Celah Hukum & Ambiguitas</h3>${gaps.length?gaps.map(g=>`<article class="lc4-item"><b>${esc(g.gap||'-')}</b><p>${esc(g.why_material||'-')}</p><small>${esc(g.evidence_tag||'[KLAIM KOSONG]')}</small></article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const pathsHtml=`<section class="lc4-section"><h3>Diagnosis Multi-Jalur Hukum</h3>${paths.length?paths.map(p=>`<article class="lc4-item"><b>${esc(p.path||'-')} · ${esc(p.strength||'-')}</b><p><b>Teori:</b> ${esc(p.legal_theory||'-')}</p><p><b>Application:</b> ${esc(p.application||'-')}</p><p><b>Counter-case:</b> ${esc(p.counter_case||'-')}</p>${list(p.evidence_needed,'Tidak ada bukti tambahan yang dicatat.')}</article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const integrationHtml=`<section class="lc4-section"><h3>Matriks Integrasi Bukti & Regulasi</h3>${matrix(['Aktor','Tindakan Faktual','Nexus KB Lokal','Nexus Hukum Online','Risiko'],integration.map(r=>[esc(r.actor||'-'),`${esc(r.factual_act||'-')}<br><small>${esc(r.evidence_tag||'')}</small>`,esc(r.local_kb_nexus||'-'),esc(r.online_law_nexus||'-'),esc(r.risk||'-')]))}</section>`;
+
+--- /mnt/data/lexy_closure/base/dist/lexicore.v6122.js	2026-09-19 07:44:00.000000000 +0000
++++ /mnt/data/lexy_closure/work/dist/lexicore.v6122.js	2026-09-20 23:03:27.000000000 +0000
+@@ -862,7 +862,7 @@
+   const matrix=(headers,rows)=>rows.length?`<div class="lc4-table-wrap"><table class="lc4-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="lc4-muted">Belum terpetakan.</p>';
+   const grounding=`<section class="lc4-section"><h3>Grounding · Fakta, Klaim & Anomali</h3><div class="lc4-grid"><div><b>Fakta Tekstual</b>${list(buckets.textual_facts)}</div><div><b>Dalil / Klaim Pihak</b>${list(buckets.party_claims)}</div></div><div style="margin-top:12px"><b>Anomali / Kontradiksi</b>${list(buckets.anomalies)}</div></section>`;
+   const actorTable=`<section class="lc4-section"><h3>Matriks Aktor & Status Hukum</h3>${matrix(['Aktor','Status Terbukti','Hak/Kewajiban Eksplisit','Evidence Tag'],actors.map(a=>[esc(a.actor||'-'),esc(a.proven_status||'-'),esc(a.explicit_rights_obligations||'-'),esc(a.evidence_tag||'-')]))}</section>`;
+-  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Terverifikasi</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
++  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Fakta dan Posisi Para Pihak</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
+   const gapsHtml=`<section class="lc4-section"><h3>Bedah Celah Hukum & Ambiguitas</h3>${gaps.length?gaps.map(g=>`<article class="lc4-item"><b>${esc(g.gap||'-')}</b><p>${esc(g.why_material||'-')}</p><small>${esc(g.evidence_tag||'[KLAIM KOSONG]')}</small></article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const pathsHtml=`<section class="lc4-section"><h3>Diagnosis Multi-Jalur Hukum</h3>${paths.length?paths.map(p=>`<article class="lc4-item"><b>${esc(p.path||'-')} · ${esc(p.strength||'-')}</b><p><b>Teori:</b> ${esc(p.legal_theory||'-')}</p><p><b>Application:</b> ${esc(p.application||'-')}</p><p><b>Counter-case:</b> ${esc(p.counter_case||'-')}</p>${list(p.evidence_needed,'Tidak ada bukti tambahan yang dicatat.')}</article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const integrationHtml=`<section class="lc4-section"><h3>Matriks Integrasi Bukti & Regulasi</h3>${matrix(['Aktor','Tindakan Faktual','Nexus KB Lokal','Nexus Hukum Online','Risiko'],integration.map(r=>[esc(r.actor||'-'),`${esc(r.factual_act||'-')}<br><small>${esc(r.evidence_tag||'')}</small>`,esc(r.local_kb_nexus||'-'),esc(r.online_law_nexus||'-'),esc(r.risk||'-')]))}</section>`;
+
+--- /mnt/data/lexy_closure/base/dist/lexicore.v70216.js	2026-09-19 08:16:44.000000000 +0000
++++ /mnt/data/lexy_closure/work/dist/lexicore.v70216.js	2026-09-20 23:03:27.000000000 +0000
+@@ -862,7 +862,7 @@
+   const matrix=(headers,rows)=>rows.length?`<div class="lc4-table-wrap"><table class="lc4-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="lc4-muted">Belum terpetakan.</p>';
+   const grounding=`<section class="lc4-section"><h3>Grounding · Fakta, Klaim & Anomali</h3><div class="lc4-grid"><div><b>Fakta Tekstual</b>${list(buckets.textual_facts)}</div><div><b>Dalil / Klaim Pihak</b>${list(buckets.party_claims)}</div></div><div style="margin-top:12px"><b>Anomali / Kontradiksi</b>${list(buckets.anomalies)}</div></section>`;
+   const actorTable=`<section class="lc4-section"><h3>Matriks Aktor & Status Hukum</h3>${matrix(['Aktor','Status Terbukti','Hak/Kewajiban Eksplisit','Evidence Tag'],actors.map(a=>[esc(a.actor||'-'),esc(a.proven_status||'-'),esc(a.explicit_rights_obligations||'-'),esc(a.evidence_tag||'-')]))}</section>`;
+-  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Terverifikasi</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
++  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Fakta dan Posisi Para Pihak</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
+   const gapsHtml=`<section class="lc4-section"><h3>Bedah Celah Hukum & Ambiguitas</h3>${gaps.length?gaps.map(g=>`<article class="lc4-item"><b>${esc(g.gap||'-')}</b><p>${esc(g.why_material||'-')}</p><small>${esc(g.evidence_tag||'[KLAIM KOSONG]')}</small></article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const pathsHtml=`<section class="lc4-section"><h3>Diagnosis Multi-Jalur Hukum</h3>${paths.length?paths.map(p=>`<article class="lc4-item"><b>${esc(p.path||'-')} · ${esc(p.strength||'-')}</b><p><b>Teori:</b> ${esc(p.legal_theory||'-')}</p><p><b>Application:</b> ${esc(p.application||'-')}</p><p><b>Counter-case:</b> ${esc(p.counter_case||'-')}</p>${list(p.evidence_needed,'Tidak ada bukti tambahan yang dicatat.')}</article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const integrationHtml=`<section class="lc4-section"><h3>Matriks Integrasi Bukti & Regulasi</h3>${matrix(['Aktor','Tindakan Faktual','Nexus KB Lokal','Nexus Hukum Online','Risiko'],integration.map(r=>[esc(r.actor||'-'),`${esc(r.factual_act||'-')}<br><small>${esc(r.evidence_tag||'')}</small>`,esc(r.local_kb_nexus||'-'),esc(r.online_law_nexus||'-'),esc(r.risk||'-')]))}</section>`;
+
+--- /mnt/data/lexy_closure/base/dist/lexicore.v70218.js	2026-09-19 13:47:38.000000000 +0000
++++ /mnt/data/lexy_closure/work/dist/lexicore.v70218.js	2026-09-20 23:03:27.000000000 +0000
+@@ -862,7 +862,7 @@
+   const matrix=(headers,rows)=>rows.length?`<div class="lc4-table-wrap"><table class="lc4-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="lc4-muted">Belum terpetakan.</p>';
+   const grounding=`<section class="lc4-section"><h3>Grounding · Fakta, Klaim & Anomali</h3><div class="lc4-grid"><div><b>Fakta Tekstual</b>${list(buckets.textual_facts)}</div><div><b>Dalil / Klaim Pihak</b>${list(buckets.party_claims)}</div></div><div style="margin-top:12px"><b>Anomali / Kontradiksi</b>${list(buckets.anomalies)}</div></section>`;
+   const actorTable=`<section class="lc4-section"><h3>Matriks Aktor & Status Hukum</h3>${matrix(['Aktor','Status Terbukti','Hak/Kewajiban Eksplisit','Evidence Tag'],actors.map(a=>[esc(a.actor||'-'),esc(a.proven_status||'-'),esc(a.explicit_rights_obligations||'-'),esc(a.evidence_tag||'-')]))}</section>`;
+-  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Terverifikasi</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
++  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Fakta dan Posisi Para Pihak</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
+   const gapsHtml=`<section class="lc4-section"><h3>Bedah Celah Hukum & Ambiguitas</h3>${gaps.length?gaps.map(g=>`<article class="lc4-item"><b>${esc(g.gap||'-')}</b><p>${esc(g.why_material||'-')}</p><small>${esc(g.evidence_tag||'[KLAIM KOSONG]')}</small></article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const pathsHtml=`<section class="lc4-section"><h3>Diagnosis Multi-Jalur Hukum</h3>${paths.length?paths.map(p=>`<article class="lc4-item"><b>${esc(p.path||'-')} · ${esc(p.strength||'-')}</b><p><b>Teori:</b> ${esc(p.legal_theory||'-')}</p><p><b>Application:</b> ${esc(p.application||'-')}</p><p><b>Counter-case:</b> ${esc(p.counter_case||'-')}</p>${list(p.evidence_needed,'Tidak ada bukti tambahan yang dicatat.')}</article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const integrationHtml=`<section class="lc4-section"><h3>Matriks Integrasi Bukti & Regulasi</h3>${matrix(['Aktor','Tindakan Faktual','Nexus KB Lokal','Nexus Hukum Online','Risiko'],integration.map(r=>[esc(r.actor||'-'),`${esc(r.factual_act||'-')}<br><small>${esc(r.evidence_tag||'')}</small>`,esc(r.local_kb_nexus||'-'),esc(r.online_law_nexus||'-'),esc(r.risk||'-')]))}</section>`;
+
+--- /mnt/data/lexy_closure/base/public/lexicore.v6122.js	2026-09-19 07:44:00.000000000 +0000
++++ /mnt/data/lexy_closure/work/public/lexicore.v6122.js	2026-09-20 23:03:27.000000000 +0000
+@@ -862,7 +862,7 @@
+   const matrix=(headers,rows)=>rows.length?`<div class="lc4-table-wrap"><table class="lc4-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="lc4-muted">Belum terpetakan.</p>';
+   const grounding=`<section class="lc4-section"><h3>Grounding · Fakta, Klaim & Anomali</h3><div class="lc4-grid"><div><b>Fakta Tekstual</b>${list(buckets.textual_facts)}</div><div><b>Dalil / Klaim Pihak</b>${list(buckets.party_claims)}</div></div><div style="margin-top:12px"><b>Anomali / Kontradiksi</b>${list(buckets.anomalies)}</div></section>`;
+   const actorTable=`<section class="lc4-section"><h3>Matriks Aktor & Status Hukum</h3>${matrix(['Aktor','Status Terbukti','Hak/Kewajiban Eksplisit','Evidence Tag'],actors.map(a=>[esc(a.actor||'-'),esc(a.proven_status||'-'),esc(a.explicit_rights_obligations||'-'),esc(a.evidence_tag||'-')]))}</section>`;
+-  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Terverifikasi</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
++  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Fakta dan Posisi Para Pihak</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
+   const gapsHtml=`<section class="lc4-section"><h3>Bedah Celah Hukum & Ambiguitas</h3>${gaps.length?gaps.map(g=>`<article class="lc4-item"><b>${esc(g.gap||'-')}</b><p>${esc(g.why_material||'-')}</p><small>${esc(g.evidence_tag||'[KLAIM KOSONG]')}</small></article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const pathsHtml=`<section class="lc4-section"><h3>Diagnosis Multi-Jalur Hukum</h3>${paths.length?paths.map(p=>`<article class="lc4-item"><b>${esc(p.path||'-')} · ${esc(p.strength||'-')}</b><p><b>Teori:</b> ${esc(p.legal_theory||'-')}</p><p><b>Application:</b> ${esc(p.application||'-')}</p><p><b>Counter-case:</b> ${esc(p.counter_case||'-')}</p>${list(p.evidence_needed,'Tidak ada bukti tambahan yang dicatat.')}</article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const integrationHtml=`<section class="lc4-section"><h3>Matriks Integrasi Bukti & Regulasi</h3>${matrix(['Aktor','Tindakan Faktual','Nexus KB Lokal','Nexus Hukum Online','Risiko'],integration.map(r=>[esc(r.actor||'-'),`${esc(r.factual_act||'-')}<br><small>${esc(r.evidence_tag||'')}</small>`,esc(r.local_kb_nexus||'-'),esc(r.online_law_nexus||'-'),esc(r.risk||'-')]))}</section>`;
+
+--- /mnt/data/lexy_closure/base/public/lexicore.v70216.js	2026-09-19 08:16:44.000000000 +0000
++++ /mnt/data/lexy_closure/work/public/lexicore.v70216.js	2026-09-20 23:03:27.000000000 +0000
+@@ -862,7 +862,7 @@
+   const matrix=(headers,rows)=>rows.length?`<div class="lc4-table-wrap"><table class="lc4-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="lc4-muted">Belum terpetakan.</p>';
+   const grounding=`<section class="lc4-section"><h3>Grounding · Fakta, Klaim & Anomali</h3><div class="lc4-grid"><div><b>Fakta Tekstual</b>${list(buckets.textual_facts)}</div><div><b>Dalil / Klaim Pihak</b>${list(buckets.party_claims)}</div></div><div style="margin-top:12px"><b>Anomali / Kontradiksi</b>${list(buckets.anomalies)}</div></section>`;
+   const actorTable=`<section class="lc4-section"><h3>Matriks Aktor & Status Hukum</h3>${matrix(['Aktor','Status Terbukti','Hak/Kewajiban Eksplisit','Evidence Tag'],actors.map(a=>[esc(a.actor||'-'),esc(a.proven_status||'-'),esc(a.explicit_rights_obligations||'-'),esc(a.evidence_tag||'-')]))}</section>`;
+-  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Terverifikasi</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
++  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Fakta dan Posisi Para Pihak</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
+   const gapsHtml=`<section class="lc4-section"><h3>Bedah Celah Hukum & Ambiguitas</h3>${gaps.length?gaps.map(g=>`<article class="lc4-item"><b>${esc(g.gap||'-')}</b><p>${esc(g.why_material||'-')}</p><small>${esc(g.evidence_tag||'[KLAIM KOSONG]')}</small></article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const pathsHtml=`<section class="lc4-section"><h3>Diagnosis Multi-Jalur Hukum</h3>${paths.length?paths.map(p=>`<article class="lc4-item"><b>${esc(p.path||'-')} · ${esc(p.strength||'-')}</b><p><b>Teori:</b> ${esc(p.legal_theory||'-')}</p><p><b>Application:</b> ${esc(p.application||'-')}</p><p><b>Counter-case:</b> ${esc(p.counter_case||'-')}</p>${list(p.evidence_needed,'Tidak ada bukti tambahan yang dicatat.')}</article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const integrationHtml=`<section class="lc4-section"><h3>Matriks Integrasi Bukti & Regulasi</h3>${matrix(['Aktor','Tindakan Faktual','Nexus KB Lokal','Nexus Hukum Online','Risiko'],integration.map(r=>[esc(r.actor||'-'),`${esc(r.factual_act||'-')}<br><small>${esc(r.evidence_tag||'')}</small>`,esc(r.local_kb_nexus||'-'),esc(r.online_law_nexus||'-'),esc(r.risk||'-')]))}</section>`;
+
+--- /mnt/data/lexy_closure/base/public/lexicore.v70218.js	2026-09-19 13:47:38.000000000 +0000
++++ /mnt/data/lexy_closure/work/public/lexicore.v70218.js	2026-09-20 23:03:27.000000000 +0000
+@@ -862,7 +862,7 @@
+   const matrix=(headers,rows)=>rows.length?`<div class="lc4-table-wrap"><table class="lc4-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="lc4-muted">Belum terpetakan.</p>';
+   const grounding=`<section class="lc4-section"><h3>Grounding · Fakta, Klaim & Anomali</h3><div class="lc4-grid"><div><b>Fakta Tekstual</b>${list(buckets.textual_facts)}</div><div><b>Dalil / Klaim Pihak</b>${list(buckets.party_claims)}</div></div><div style="margin-top:12px"><b>Anomali / Kontradiksi</b>${list(buckets.anomalies)}</div></section>`;
+   const actorTable=`<section class="lc4-section"><h3>Matriks Aktor & Status Hukum</h3>${matrix(['Aktor','Status Terbukti','Hak/Kewajiban Eksplisit','Evidence Tag'],actors.map(a=>[esc(a.actor||'-'),esc(a.proven_status||'-'),esc(a.explicit_rights_obligations||'-'),esc(a.evidence_tag||'-')]))}</section>`;
+-  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Terverifikasi</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
++  const timelineHtml=`<section class="lc4-section"><h3>Kronologi Fakta dan Posisi Para Pihak</h3>${matrix(['Waktu','Peristiwa','Evidence Tag'],timeline.map(t=>[esc(t.time||'-'),esc(t.event||'-'),esc(t.evidence_tag||'-')]))}</section>`;
+   const gapsHtml=`<section class="lc4-section"><h3>Bedah Celah Hukum & Ambiguitas</h3>${gaps.length?gaps.map(g=>`<article class="lc4-item"><b>${esc(g.gap||'-')}</b><p>${esc(g.why_material||'-')}</p><small>${esc(g.evidence_tag||'[KLAIM KOSONG]')}</small></article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const pathsHtml=`<section class="lc4-section"><h3>Diagnosis Multi-Jalur Hukum</h3>${paths.length?paths.map(p=>`<article class="lc4-item"><b>${esc(p.path||'-')} · ${esc(p.strength||'-')}</b><p><b>Teori:</b> ${esc(p.legal_theory||'-')}</p><p><b>Application:</b> ${esc(p.application||'-')}</p><p><b>Counter-case:</b> ${esc(p.counter_case||'-')}</p>${list(p.evidence_needed,'Tidak ada bukti tambahan yang dicatat.')}</article>`).join(''):'<p class="lc4-muted">Belum terpetakan.</p>'}</section>`;
+   const integrationHtml=`<section class="lc4-section"><h3>Matriks Integrasi Bukti & Regulasi</h3>${matrix(['Aktor','Tindakan Faktual','Nexus KB Lokal','Nexus Hukum Online','Risiko'],integration.map(r=>[esc(r.actor||'-'),`${esc(r.factual_act||'-')}<br><small>${esc(r.evidence_tag||'')}</small>`,esc(r.local_kb_nexus||'-'),esc(r.online_law_nexus||'-'),esc(r.risk||'-')]))}</section>`;
+
+--- /dev/null	2026-09-21 01:21:53.674879051 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-lawyer-workflow-closure-v2.ts	2026-09-21 01:32:08.759235169 +0000
+@@ -0,0 +1,45 @@
++import { buildLawyerWorkflow } from '../server/lawyerWorkflow';
++declare const process:any;
++let pass=0,total=0;
++const ck=(name:string,ok:boolean,detail='')=>{ total++; console.log(`${ok?'PASS':'FAIL'} ${name}${detail?` :: ${detail}`:''}`); if(ok)pass++; };
++
++function run(text:string, actors:any[]){
++  return buildLawyerWorkflow({
++    title:'Deterministic lawyer-workflow closure', text, sourceRole:'INVESTIGATION_OR_BAP', domainContext:{},
++    evidence:{textual_facts:[],party_claims:[]}, legalIssues:[{issue:'Uji kewenangan dan prosedur',analysis:'Uji SOP dan pembagian tugas.'}],
++    legalGaps:[], adverseEvidence:[], applicableLaw:[], verifiedTimeline:[], actorMatrix:actors,
++  });
++}
++
++const operationalActors=[
++  {actor:'Kepala Bagian Kredit',roles:['Kabag Kredit'],pages:[1]},
++  {actor:'Tim Analisa',roles:['Account Officer','Legal'],pages:[1]},
++  {actor:'Debitur',roles:['Debitur'],pages:[1]},
++  {actor:'Penyidik',roles:['Penyidik'],pages:[1]},
++];
++const positive=run(
++  'BERITA ACARA PEMERIKSAAN TERSANGKA. Kredit Rp255.000.000 diproses oleh Tim Kredit. Penyidik mempertanyakan kredit tanpa survei ulang dan pengurangan provisi. Agunan BPKB dikuasai bank.',
++  operationalActors,
++);
++ck('financial discrepancy captures omitted/reduced procedure',positive.financial_collateral_audit.discrepancy_terms.some(x=>/tanpa survei ulang|pengurangan provisi/i.test(x)),positive.financial_collateral_audit.discrepancy_terms.join('|'));
++ck('operational role may become fact-witness candidate',positive.witness_strategy.witness_targets.some(x=>x.category==='FACT_WITNESS'&&/Kepala Bagian Kredit|Tim Analisa/i.test(x.witness)),positive.witness_strategy.witness_targets.map(x=>`${x.witness}:${x.category}`).join('|'));
++ck('procedural actor remains procedural with caution',positive.witness_strategy.witness_targets.some(x=>x.category==='PROCEDURAL_ACTOR'&&/Penyidik/i.test(x.witness)&&!!x.caution));
++ck('party-only actor is not auto-promoted to witness',!positive.witness_strategy.witness_targets.some(x=>/^Debitur$/i.test(x.witness)));
++
++const noFinancial=run(
++  'BERITA ACARA PEMERIKSAAN. Tidak ada kredit, pinjaman, agunan, transfer, atau transaksi keuangan dalam perkara ini. Dokumen administrasi belum lengkap.',
++  [{actor:'Staf Administrasi',roles:['Staf'],pages:[1]}],
++);
++ck('explicit absence does not activate financial audit',noFinancial.financial_collateral_audit.active===false,String(noFinancial.financial_collateral_audit.active));
++ck('generic administrative incompleteness is not financial discrepancy',noFinancial.financial_collateral_audit.discrepancy_terms.length===0,String(noFinancial.financial_collateral_audit.discrepancy_terms.length));
++ck('generic actor is not auto-promoted to witness',noFinancial.witness_strategy.witness_targets.length===0,String(noFinancial.witness_strategy.witness_targets.length));
++
++const financeNoDiscrepancy=run(
++  'BERITA ACARA PEMERIKSAAN. Fasilitas kredit telah lunas. Agunan BPKB asli tersimpan di bank dan seluruh dokumen dinyatakan lengkap.',
++  [{actor:'Kabag Kredit',roles:['Kepala Bagian Kredit'],pages:[1]}],
++);
++ck('finance context alone does not invent discrepancy',financeNoDiscrepancy.financial_collateral_audit.discrepancy_terms.length===0,financeNoDiscrepancy.financial_collateral_audit.discrepancy_terms.join('|'));
++ck('operational witness candidate still requires concrete operational role',financeNoDiscrepancy.witness_strategy.witness_targets.some(x=>/Kabag Kredit/i.test(x.witness)));
++
++console.log(`\n${pass}/${total} lawyer-workflow closure checks PASS`);
++if(pass!==total) process.exitCode=1;
+
+--- /mnt/data/lexy_closure/base/scripts/audit-lawyer-workflow-v55.ts	2026-09-17 06:42:14.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-lawyer-workflow-v55.ts	2026-09-21 01:26:58.684953965 +0000
+@@ -31,7 +31,7 @@
+ check('criminal expert inferred',wf.witness_strategy.expert_domains.some(x=>/pidana/i.test(x)),wf.witness_strategy.expert_domains.join('|'));
+ check('draft chronology planned',wf.drafting_plan.some(x=>/kronologi/i.test(x.document)));
+ check('draft evidence map planned',wf.drafting_plan.some(x=>/pembuktian|allegation/i.test(x.document)));
+-check('draft defense memo planned',wf.drafting_plan.some(x=>/defense|pembelaan/i.test(x.document)));
++check('stage-appropriate criminal drafting planned',wf.drafting_plan.some(x=>/pendampingan pemeriksaan|pembelaan|defense/i.test(x.document))); 
+ check('witness questions planned',wf.drafting_plan.some(x=>/saksi/i.test(x.document)));
+ check('citation verification next action',wf.next_actions.some(x=>/citation|status berlaku|tempus/i.test(x)));
+ check('no named-case hardcode in workflow output',!/Elya|Dewi Mufarida|Blitar/i.test(JSON.stringify(wf)));
+
+--- /mnt/data/lexy_closure/base/scripts/audit-lawyer-workflow-v551.ts	2026-09-17 06:42:14.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-lawyer-workflow-v551.ts	2026-09-21 01:26:58.685402044 +0000
+@@ -15,7 +15,7 @@
+ ck('10 workflow stages',r.stages.length===10,String(r.stages.length));
+ ck('allegation matrix issue aligned',r.allegation_response_matrix.length===issues.length,String(r.allegation_response_matrix.length));
+ ck('counter evidence relevance selective',r.allegation_response_matrix.some(x=>x.counter_material.length>0),'');
+-ck('authority matrix',r.authority_duty_matrix.length>=4,String(r.authority_duty_matrix.length));
++ck('authority matrix limited to actors with formal authority',r.authority_duty_matrix.some(x=>/Direktur/i.test(x.actor))&&r.authority_duty_matrix.some(x=>/Penyidik/i.test(x.actor)),r.authority_duty_matrix.map(x=>x.actor).join('|'));
+ ck('financial audit active',r.financial_collateral_audit.active===true,'');
+ ck('amount extracted',r.financial_collateral_audit.amounts.some(x=>x.includes('255')),'' );
+ ck('collateral extracted',r.financial_collateral_audit.collateral_terms.length>0,'');
+
+--- /dev/null	2026-09-21 01:21:53.674879051 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-regression-consolidation-cumulative-v2.ts	2026-09-20 23:16:29.000000000 +0000
+@@ -0,0 +1,51 @@
++import assert from 'node:assert/strict';
++import { buildEvidenceModel } from '../server/evidenceModel';
++import { deriveOntologyIssues } from '../server/legalOntology';
++import { resolveProceduralPosture } from '../server/proceduralPosture';
++import { buildLawyerWorkflow } from '../server/lawyerWorkflow';
++
++let pass = 0;
++function check(name:string, fn:()=>void) {
++  try { fn(); pass++; console.log(`PASS | ${name}`); }
++  catch (err) { console.error(`FAIL | ${name}`); throw err; }
++}
++function actorNames(text:string) { return buildEvidenceModel(text).actors.map(x => x.actor); }
++function issueIds(text:string) { return deriveOntologyIssues(text).map(x => x.id); }
++function workflow(text:string, sourceRole='LEGAL_CORRESPONDENCE') {
++  return buildLawyerWorkflow({
++    title:'', text, sourceRole, domainContext:{},
++    evidence:{ textual_facts:[], party_claims:[] }, legalIssues:[], legalGaps:[],
++    adverseEvidence:[], applicableLaw:[], verifiedTimeline:[], actorMatrix:[],
++  });
++}
++
++const bap = `BERITA ACARA PEMERIKSAAN\nPada hari Senin tanggal 12 Maret 2024 Penyidik Budi Santoso memeriksa Tersangka ELYA DWI ADMOKO.\nSaksi DEWI MUFARIDA menerangkan bahwa Perumda BPR Kota Blitar mencairkan kredit pada tanggal 15 Februari 2024.\nNIP 19700101. Anak Kandung. Setelah pemeriksaan selesai. Demikian berita acara ini dibuat.`;
++const bapModel = buildEvidenceModel(bap);
++const bapActors = bapModel.actors.map(x => x.actor);
++
++check('BAP: ELYA DWI ADMOKO is one canonical actor', () => assert.equal(bapActors.filter(x => x === 'ELYA DWI ADMOKO').length, 1));
++check('BAP: DEWI MUFARIDA is one canonical actor', () => assert.equal(bapActors.filter(x => x === 'DEWI MUFARIDA').length, 1));
++check('BAP: Perumda BPR Kota Blitar is one canonical entity', () => assert.equal(bapActors.filter(x => x === 'Perumda BPR Kota Blitar').length, 1));
++check('BAP: lexical noise is not an actor', () => assert.deepEqual(bapActors.filter(x => ['NIP','Kandung','Setelah','Demikian','Bahwa'].includes(x)), []));
++check('BAP: active-voice examination date reaches timeline', () => assert.ok(bapModel.timeline.some(x => x.date === '12 Maret 2024')));
++check('BAP: material credit-disbursement date reaches timeline', () => assert.ok(bapModel.timeline.some(x => x.date === '15 Februari 2024')));
++
++check('actor: dotted initial remains intact', () => assert.ok(actorNames('Tersangka M. Yusuf Hidayat diperiksa oleh Penyidik.').includes('M. Yusuf Hidayat')));
++check('actor: defined pleading party is extracted', () => assert.ok(actorNames('BUDI SANTOSO, selanjutnya disebut PENGGUGAT, mengajukan gugatan.').includes('BUDI SANTOSO')));
++
++check('posture: historical somasi cannot override pleading identity', () => assert.equal(resolveProceduralPosture({title:'GUGATAN', text:'GUGATAN\nPenggugat telah mengirimkan somasi kepada Tergugat. POSITA PETITUM', sourceRole:'LITIGATION_SUBMISSION'}).stage, 'PLEADING'));
++check('posture: true SOMASI title remains pre-litigation', () => assert.equal(resolveProceduralPosture({title:'SOMASI', text:'SOMASI\nTeguran hukum', sourceRole:'LEGAL_CORRESPONDENCE'}).stage, 'PRE_LITIGATION'));
++check('posture: SOMASI PERTAMA first-line remains pre-litigation', () => assert.equal(resolveProceduralPosture({text:'SOMASI PERTAMA\nKepada Yth Debitur', sourceRole:'LEGAL_CORRESPONDENCE'}).stage, 'PRE_LITIGATION'));
++
++const sale = 'Perihal: Jual beli tanah. Para pihak: Agnes, Irma, Imam, Hendra. Agnes menjual tanah 150 m2 kepada Irma. Belakangan Agnes bermaksud menjual objek yang sama kepada Hendra.';
++check('issue: competing disposition survives material-nexus gate', () => assert.ok(issueIds(sale).includes('competing-disposition')));
++check('issue: pledge to another party survives material-nexus gate', () => assert.ok(issueIds('Pemilik menyerahkan kendaraan kepada Penyewa. Penyewa kemudian menggadaikan kendaraan kepada pihak lain tanpa izin pemilik.').includes('asset-disposition-authority')));
++check('issue: ordinary vendor transfer does not create disposition issue', () => assert.ok(!issueIds('Bank mencairkan kredit dan dana ditransfer ke rekening pihak ketiga selaku vendor sesuai instruksi debitur.').includes('asset-disposition-authority')));
++check('issue: incidental director/PT words do not create corporate authority', () => assert.ok(!issueIds('Direktur PT hadir memberikan keterangan sebagai saksi mengenai pencairan kredit.').includes('corporate-authority')));
++check('issue: incidental status word does not create formal-status issue', () => assert.ok(!issueIds('Status pemeriksaan saksi telah selesai pada hari ini.').includes('formal-status')));
++
++check('orientation: mere mention of Tergugat is neutral', () => assert.equal(workflow('Surat ini menyebut Tergugat dalam kronologi.').orientation, 'GENERAL_COUNSEL_REVIEW'));
++check('orientation: defining both parties is not silently defense-side', () => assert.equal(workflow('Budi selanjutnya disebut PENGGUGAT. Agus selanjutnya disebut TERGUGAT.').orientation, 'GENERAL_COUNSEL_REVIEW'));
++
++console.log(`SUMMARY ${pass}/18 regression-consolidation cumulative cross-case checks PASS`);
++assert.equal(pass, 18);
+
+--- /dev/null	2026-09-21 01:21:53.674879051 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-regression-consolidation-ingestion-v2.ts	2026-09-20 23:17:27.000000000 +0000
+@@ -0,0 +1,44 @@
++import assert from 'node:assert/strict';
++import { extractUploadedDocument } from '../server/documentIngestion';
++
++function escapePdfText(s:string){ return s.replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)'); }
++function buildTextPdf(pageCount:number, blankPages:number[]):Buffer {
++  const objects = new Map<number,string>();
++  const kids:number[]=[];
++  objects.set(1, '<< /Type /Catalog /Pages 2 0 R >>');
++  objects.set(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
++  for(let i=1;i<=pageCount;i++){
++    const pageObj=4+(i-1)*2, contentObj=pageObj+1; kids.push(pageObj);
++    const text = blankPages.includes(i) ? '' : (`HALAMAN ${i} DOKUMEN UJI. Bahwa halaman ini berisi fakta hukum, perjanjian, pihak, kewajiban, bukti dan kronologi yang cukup untuk ekstraksi text layer. `.repeat(6));
++    const stream = text ? `BT /F1 10 Tf 40 780 Td (${escapePdfText(text)}) Tj ET` : '';
++    objects.set(pageObj, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObj} 0 R >>`);
++    objects.set(contentObj, `<< /Length ${Buffer.byteLength(stream,'ascii')} >>\nstream\n${stream}\nendstream`);
++  }
++  objects.set(2, `<< /Type /Pages /Count ${pageCount} /Kids [${kids.map(n=>`${n} 0 R`).join(' ')}] >>`);
++  const maxObj=Math.max(...objects.keys());
++  const chunks:string[]=['%PDF-1.4\n']; const offsets:number[]=[0];
++  let len=Buffer.byteLength(chunks[0],'ascii');
++  for(let n=1;n<=maxObj;n++){
++    const obj=objects.get(n) ?? '<< >>'; offsets[n]=len;
++    const chunk=`${n} 0 obj\n${obj}\nendobj\n`; chunks.push(chunk); len+=Buffer.byteLength(chunk,'ascii');
++  }
++  const xref=len; let x=`xref\n0 ${maxObj+1}\n0000000000 65535 f \n`;
++  for(let n=1;n<=maxObj;n++) x += `${String(offsets[n]).padStart(10,'0')} 00000 n \n`;
++  x += `trailer\n<< /Size ${maxObj+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
++  chunks.push(x); return Buffer.from(chunks.join(''),'ascii');
++}
++
++async function main(){
++  const pdf=buildTextPdf(20,[7]);
++  const result=await extractUploadedDocument(pdf,'text-layer-20p-blank7.pdf','application/pdf');
++  assert.equal(result.mode,'PDF_LOCAL_TEXT');
++  assert.equal(result.pages_total,20);
++  assert.deepEqual(result.failed_pages,[7]);
++  assert.deepEqual(result.source_quality?.excluded_pages,[7]);
++  assert.equal(result.source_quality?.page_coverage,0.95);
++  assert.match(result.text,/HALAMAN 8 DOKUMEN UJI/);
++  assert.doesNotMatch(result.text,/HALAMAN 7 DOKUMEN UJI/);
++  console.log('PASS | text-layer 20p blank page excludes page 7 only and preserves page 8');
++  console.log('SUMMARY 1/1 production-path text-layer ingestion checks PASS');
++}
++main().catch(err=>{ console.error('FAIL | production-path text-layer ingestion',err); process.exit(1); });
+
+--- /dev/null	2026-09-21 01:21:53.674879051 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-regression-consolidation-review-contract-v2.mjs	2026-09-20 23:17:53.000000000 +0000
+@@ -0,0 +1,20 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import { validateReasoningDocumentIntegrity } from '../server/caseIntegrityPolicy.mjs';
++
++const page = (n) => `--- HALAMAN ${n} ---\nPASAL ${n}. Para pihak menyepakati kewajiban pembayaran, bukti, wanprestasi, forum, dan penyelesaian sengketa secara tertulis.`;
++const text = [1,2,3].map(page).join('\n\n');
++const integrity = validateReasoningDocumentIntegrity({
++  inputType:'document', text,
++  ingestion:{ mode:'PDF_LOCAL_TEXT', pages_total:3, pages_ocr:3, coverage_ratio:1, source_quality:{ status:'GOOD' } },
++});
++assert.equal(integrity.ok, true, JSON.stringify(integrity));
++const server = fs.readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
++const routeStart = server.indexOf("app.post('/api/review'");
++const routeEnd = server.indexOf("app.post('/api/", routeStart + 20);
++const route = server.slice(routeStart, routeEnd > routeStart ? routeEnd : routeStart + 5000);
++assert.match(route, /validateReasoningDocumentIntegrity/);
++assert.match(route, /if\s*\(\s*!integrity\.ok\s*\)/);
++assert.doesNotMatch(route, /integrity\.passed/);
++console.log('PASS | /api/review uses canonical integrity.ok contract');
++console.log('SUMMARY 1/1 review integrity-contract checks PASS');
+
+--- /mnt/data/lexy_closure/base/scripts/audit-v611-source-quality-guard.ts	2026-09-17 06:42:14.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-v611-source-quality-guard.ts	2026-09-21 01:25:46.889333220 +0000
+@@ -22,8 +22,8 @@
+ ]);
+ 
+ check('1. low OCR page makes source review-required', guarded.status==='REVIEW_REQUIRED', `status=${guarded.status}`);
+-check('2. page below threshold is excluded', guarded.excluded_pages.length===1 && guarded.excluded_pages[0]===2, `excluded=${guarded.excluded_pages.join(',')}`);
+-check('3. good pages remain usable', guarded.usable_pages===2, `usable=${guarded.usable_pages}`);
++check('2. low confidence alone does not exclude present content', guarded.excluded_pages.length===0 && guarded.low_confidence_pages.includes(2), `excluded=${guarded.excluded_pages.join(',')}; low=${guarded.low_confidence_pages.join(',')}`);
++check('3. content-present pages remain coverage despite low confidence', guarded.usable_pages===3, `usable=${guarded.usable_pages}`);
+ check('4. excluded OCR text is absent from analysis text', !/Jaksa Madya|CamScanner/.test(guarded.text));
+ const em=buildEvidenceModel(guarded.text);
+ check('5. low-quality page cannot create actor', !em.actors.some(a=>/Jaksa Madya/i.test(a.actor)), `actors=${em.actors.map(a=>a.actor).join(',')}`);
+
+--- /mnt/data/lexy_closure/base/scripts/audit-v6121-canonical-consolidation.mjs	2026-09-17 06:42:14.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-v6121-canonical-consolidation.mjs	2026-09-21 01:25:46.889205471 +0000
+@@ -13,7 +13,7 @@
+ check('A evidence model present', ev.includes('buildEvidenceModel'));
+ check('A forensic reasoner present', fw.includes('reason'));
+ check('B canonical analysis readiness helper in exporter', exp.includes('function analysisReadinessScore'));
+-check('B header/export status uses canonical analysis readiness', exp.includes('STATUS ANALISIS') && exp.includes('analysisReadinessScore(analysis)'));
++check('B header/export status uses canonical analysis readiness', exp.includes('Kesiapan Analisis') && exp.includes('analysisReadinessScore(analysis)') && !exp.includes('STATUS ANALISIS'));
+ check('B pipeline gate remains a separate metric', exp.includes('pipelineGateLabel(analysis)'));
+ check('B analysis readiness is min(pipeline, working paper)', ca.includes('Math.min(pipelineGateReadinessScore, workingPaperReadinessScore)'));
+ check('B workflow posture implementation present', lw.includes('procedural'));
+
+--- /mnt/data/lexy_closure/base/scripts/audit-v684-evidence-provenance-integrity.mjs	2026-09-17 06:42:14.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-v684-evidence-provenance-integrity.mjs	2026-09-21 01:25:46.889105232 +0000
+@@ -10,7 +10,7 @@
+   ['claim-first actor fallback remains claim', /LEGAL_CORRESPONDENCE[\s\S]{0,160}tagClaim/.test(reasoner)],
+   ['exporter humanizes reference/adverse/anomaly tags', /REFERENSI\|BUKTI LAWAN\|ANOMALI/.test(exporter)],
+   ['supporting tag is not FACT tag', !/supporting_evidence:supporting[\s\S]{0,220}tagFact\(/.test(reasoner)],
+-  ['chronology heading does not claim all events are verified', /Kronologi Terpetakan \(Fakta\/Klaim\)/.test(exporter) && !/Kronologi Terverifikasi/.test(exporter)],
++  ['chronology heading does not claim all events are verified', /Kronologi Fakta dan Posisi Para Pihak/.test(exporter) && !/Kronologi Terverifikasi|Kronologi Terpetakan \(Fakta\/Klaim\)/.test(exporter)],
+ ];
+ let pass=0;
+ for(const [name,ok] of checks){console.log(`${ok?'PASS':'FAIL'} | ${name}`); if(ok) pass++;}
+
+--- /mnt/data/lexy_closure/base/scripts/audit-v690-group-a-correctness.mjs	2026-09-17 06:42:14.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-v690-group-a-correctness.mjs	2026-09-20 23:11:50.000000000 +0000
+@@ -17,7 +17,7 @@
+ // #1 Evidence Quality / Claim-to-Fact Integrity
+ add('1.1 supporting evidence remains reference-tagged',/supporting_evidence:supporting[\s\S]{0,240}tagSupport\(/.test(reasoner));
+ add('1.2 actor provenance resolves from evidence statement class',/tagForEvidenceStatement\(provenance\)/.test(reasoner));
+-add('1.3 chronology heading is epistemically neutral',/Kronologi Terpetakan \(Fakta\/Klaim\)/.test(exporter) && !/Kronologi Terverifikasi/.test(exporter));
++add('1.3 chronology heading is epistemically neutral',/Kronologi Fakta dan Posisi Para Pihak/.test(exporter) && !/Kronologi Terverifikasi/.test(exporter));
+ 
+ // #2 Actor Entity Resolution
+ add('2.1 actor model exposes canonical entity metadata',/entity_type\?: 'PERSON'\|'ROLE'\|'ORGANIZATION'/.test(evidence) && /canonical_key\?: string/.test(evidence));
+@@ -33,17 +33,19 @@
+ 
+ // #4 Temporal Applicability
+ add('4.1 candidate year after case tempus is incompatible',/candidateYear > tempusYear\) return 'POTENTIALLY_INCOMPATIBLE'/.test(retriever));
+-add('4.2 temporal gate runs before semantic binding',/GATE 0\.5[\s\S]{0,900}POTENTIALLY_INCOMPATIBLE[\s\S]{0,500}GATE 1 — domain alignment/.test(caseAnalysis));
++const temporalGatePos=caseAnalysis.indexOf('GATE 0.5'); const temporalRejectPos=caseAnalysis.indexOf('POTENTIALLY_INCOMPATIBLE', temporalGatePos); const domainGatePos=caseAnalysis.indexOf('GATE 1 — domain alignment', temporalGatePos);
++add('4.2 temporal gate runs before semantic binding',temporalGatePos>=0 && temporalRejectPos>temporalGatePos && domainGatePos>temporalRejectPos);
+ add('4.3 local and official binding candidates carry tempus status',/tempus_status:\(tempusYear && Number\(reg\.tahun\) > tempusYear/.test(caseAnalysis) && /tempus_status:\(c\.tempus_status\|\|'UNVERIFIED'\)/.test(caseAnalysis));
+ add('4.4 temporal rejection is auditable',/temporal_rejections: bindingPool\.flatMap/.test(caseAnalysis));
+ 
+ // Runtime actor-resolution smoke test through platform-neutral TypeScript transpile.
+ const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'lexicora-group-a-'));
+-for(const f of ['legalOntology.ts','evidenceModel.ts']){
++for(const f of ['proceduralPosture.ts','legalOntology.ts','evidenceModel.ts']){
+   const src=fs.readFileSync(path.join('server',f),'utf8');
+   const out=ts.transpileModule(src,{fileName:f,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
+   fs.writeFileSync(path.join(tmp,f.replace(/\.ts$/,'.js')),out);
+ }
++fs.copyFileSync(path.join('server','caseIntegrityPolicy.mjs'),path.join(tmp,'caseIntegrityPolicy.mjs'));
+ const runtimeRequire=createRequire(path.join(tmp,'runner.cjs'));
+ const { buildEvidenceModel }=runtimeRequire(path.join(tmp,'evidenceModel.js'));
+ const model=buildEvidenceModel('Terdakwa Drs. Elya Dwi Admoko, M.M. hadir. Elya Dwi Admoko menandatangani surat. Sdri. Dewi Mufarida menyerahkan dokumen.');
+
+--- /mnt/data/lexy_closure/base/scripts/audit-v70231-ocr-durable-recovery.ts	2026-09-20 08:49:46.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/audit-v70231-ocr-durable-recovery.ts	2026-09-20 23:19:05.000000000 +0000
+@@ -4,6 +4,7 @@
+ import path from 'node:path';
+ import { __test__ as ocrTest } from '../server/localOcr.ts';
+ import { CaseJobStore } from '../server/caseJobStore.ts';
++import { extractUploadedDocument } from '../server/documentIngestion.ts';
+ 
+ let pass = 0;
+ function ok(name:string, fn:()=>void) {
+@@ -16,6 +17,17 @@
+   catch (e) { console.error('FAIL', name, e); throw e; }
+ }
+ 
++async function main() {
++await aok('production image OCR audit exercises extractUploadedDocument lane', async () => {
++  const fixture = fs.readFileSync(path.join(process.cwd(), 'scripts', 'fixtures', 'bap-production-lane.png'));
++  const result = await extractUploadedDocument(fixture, 'bap-production-lane.png', 'image/png');
++  assert.equal(result.mode, 'LOCAL_OCR');
++  assert.equal(result.pages_total, 1);
++  assert.ok(result.text.length > 40);
++  const normalized = result.text.toUpperCase().replace(/[^A-Z0-9]+/g, '');
++  assert.ok(normalized.includes('BERITA') && normalized.includes('PEMERIKSAAN'), `unexpected OCR text: ${result.text.slice(0,160)}`);
++});
++
+ const seen:number[] = [];
+ const tracker = ocrTest.createOcrProgressTracker(36, p => seen.push(Number(p.percent)));
+ tracker.update(4, 80, 'page4');
+@@ -48,7 +60,7 @@
+   assert.deepEqual(failed, [27]);
+ });
+ 
+-const serverSource=fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname),'..','server.ts'),'utf8');
++const serverSource=fs.readFileSync(path.join(process.cwd(),'server.ts'),'utf8');
+ ok('final progress stage is aligned to frontend COMPLETED contract', () => assert.match(serverSource, /stage:'COMPLETED'/));
+ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lexicore-v31-job-'));
+ const storeA = new CaseJobStore(tmp);
+@@ -70,7 +82,9 @@
+ ok('source binary is deleted only after completion cleanup', () => assert.equal(storeB.readSource('job-36'), null));
+ 
+ fs.rmSync(tmp, {recursive:true,force:true});
+-console.log(`SUMMARY ${pass}/13 V7.0.2.31 OCR + durable recovery`);
+-assert.equal(pass, 13);
++console.log(`SUMMARY ${pass}/14 V7.0.2.31 OCR + durable recovery`);
++assert.equal(pass, 14);
++
++}
+ 
+-process.exit(0);
++main().catch((err) => { console.error(err); process.exit(1); });
+
+--- /mnt/data/lexy_closure/base/scripts/regression-corpus/fixtures.ts	2026-09-17 06:42:14.000000000 +0000
++++ /mnt/data/lexy_closure/work/scripts/regression-corpus/fixtures.ts	2026-09-20 23:01:08.000000000 +0000
+@@ -116,7 +116,7 @@
+       input_type: 'narrative+document',
+       regulatory_mode: 'offline',
+       document_ingestion: {
+-        text: tanahSertifikatSengketa,
++        text: [1,2,4,5,6].map((page)=>`--- HALAMAN ${page} ---\n${tanahSertifikatSengketa}`).join('\n\n'),
+         mode: 'LOCAL_OCR',
+         pages_total: 6,
+         pages_ocr: 5,
+
+--- /mnt/data/lexy_closure/base/server.ts	2026-09-20 09:37:58.000000000 +0000
++++ /mnt/data/lexy_closure/work/server.ts	2026-09-20 23:03:27.000000000 +0000
+@@ -18,7 +18,7 @@
+ import { createDocxBuffer, createPdfBuffer, createWorkingDocumentDocxBuffer } from './server/exporters';
+ import { extractUploadedDocument } from './server/documentIngestion';
+ import { caseJobStore, type CaseJobProgress } from './server/caseJobStore';
+-import { caseLifecycleState, isCaseAnalysisFinalized } from './server/caseIntegrityPolicy.mjs';
++import { caseLifecycleState, isCaseAnalysisFinalized, validateReasoningDocumentIntegrity } from './server/caseIntegrityPolicy.mjs';
+ 
+ // Load local developer credentials first, then fall back to .env without overriding them.
+ dotenv.config({ path: '.env.local' });
+@@ -517,6 +517,10 @@
+     if (req.file) {
+       filename = req.file.originalname;
+       const ingested = await extractUploadedDocument(req.file.buffer, req.file.originalname, req.file.mimetype);
++      const integrity = validateReasoningDocumentIntegrity({ inputType:'document', text:ingested.text, ingestion:ingested });
++      if (!integrity.ok) {
++        return res.status(422).json({ success:false, error:'Integritas hasil ingestion belum cukup untuk review kontrak.', integrity });
++      }
+       text = ingested.text || text;
+     }
+ 
+
+--- /mnt/data/lexy_closure/base/server/caseAnalysis.ts	2026-09-20 09:37:58.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/caseAnalysis.ts	2026-09-20 23:01:08.000000000 +0000
+@@ -1946,7 +1946,7 @@
+     const nexus=bind.matched.slice(0,6).join(', ');
+     const article=bind.articles.length?bind.articles.slice(0,6).join(', '):item.article;
+     const provenance=safeString(item.relevance)
+-      .replace(/Keterkaitan material dengan isu telah lolos[^.]*\.?/gi,'')
++      .replace(/Keterkaitan material dengan isu telah lolos(?:\s+retrieval\s+gate)?\s*,?\s*(?:tetapi\s+)?/gi,'')
+       .replace(/Kandidat ditemukan melalui penelusuran\s+"[^"]*"\.?/gi,'')
+       .trim();
+     const relevance=[
+@@ -2439,12 +2439,24 @@
+   tracer.end('lawyer_workflow', `stages=${lawyer_workflow.stages.length}; matrix=${lawyer_workflow.allegation_response_matrix.length}`);
+ 
+   tracer.begin('risk_score');
+-  const risk_matrix: CaseRiskItem[] = reasoning.risks.map((r, i) => ({
+-    clause: safeString(r.clause) || `Risiko ${i+1}`,
+-    level: (['HIGH','MEDIUM','LOW'].includes(String(r.level).toUpperCase()) ? String(r.level).toUpperCase() : 'MEDIUM') as CaseRiskItem['level'],
+-    finding: safeString(r.finding) || 'Risiko memerlukan verifikasi lebih lanjut.',
+-    mitigation: safeString(r.mitigation) || 'Verifikasi fakta, bukti, norma, dan strategi sebelum tindakan final.',
+-  }));
++  const boundAuthorityCount = new Set((legal_issues||[]).flatMap((issue:any)=>(issue?.bound_authorities||[]).map((b:any)=>safeString(b?.authority_identity||b?.source_label||'')).filter(Boolean))).size;
++  const risk_matrix: CaseRiskItem[] = reasoning.risks.map((r, i) => {
++    const clause=safeString(r.clause) || `Risiko ${i+1}`;
++    if(clause==='Hukum positif & tempus') return {
++      clause,
++      level:(boundAuthorityCount ? 'MEDIUM' : 'HIGH') as CaseRiskItem['level'],
++      finding:boundAuthorityCount
++        ? `${boundAuthorityCount} authority lolos binding issue → regime/forum/stage/tempus; pasal dan penerapan faktual tetap wajib diverifikasi profesional.`
++        : 'Belum ada authority yang lolos binding issue → regime/forum/stage/tempus untuk dijadikan rule final.',
++      mitigation:'Verifikasi pasal, perubahan/pencabutan, effective date, dan nexus faktual pada authority yang benar-benar lolos binding.',
++    };
++    return {
++      clause,
++      level: (['HIGH','MEDIUM','LOW'].includes(String(r.level).toUpperCase()) ? String(r.level).toUpperCase() : 'MEDIUM') as CaseRiskItem['level'],
++      finding: safeString(r.finding) || 'Risiko memerlukan verifikasi lebih lanjut.',
++      mitigation: safeString(r.mitigation) || 'Verifikasi fakta, bukti, norma, dan strategi sebelum tindakan final.',
++    };
++  });
+   const computedRisk = risk_matrix.length ? Math.round(risk_matrix.reduce((n, r) => n + LEVEL_SCORE[r.level], 0) / risk_matrix.length) : 55;
+   const aiRisk = Number(reasoning.overall_risk_score);
+   const highStakesRolesForStrategicOutput=['DEFENSE_SUBMISSION_WITH_EXHIBITS','COMPLAINT_OR_PETITION','LITIGATION_SUBMISSION','INVESTIGATION_OR_BAP'];
+
+--- /mnt/data/lexy_closure/base/server/documentIngestion.ts	2026-09-20 18:19:52.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/documentIngestion.ts	2026-09-20 23:03:27.000000000 +0000
+@@ -458,6 +458,12 @@
+   for (const m of String(text || '').matchAll(/--- HALAMAN\s+(\d+)\s+---\n([\s\S]*?)(?=\n\n--- HALAMAN\s+\d+\s+---|$)/g)) {
+     pageTextByNumber.set(Number(m[1]), String(m[2] || '').trim());
+   }
++  // Single-image OCR legitimately has no PDF-style page marker. Treat the
++  // complete OCR result as page 1 so the canonical quality guard evaluates
++  // production image OCR instead of deleting otherwise usable text.
++  if (!pageTextByNumber.size && (totalPages || pageConfidences.length || 1) === 1 && String(text || '').trim()) {
++    pageTextByNumber.set(Number(pageConfidences[0]?.page || 1), String(text || '').trim());
++  }
+   const enrichedPageConfidences = (Array.isArray(pageConfidences) ? pageConfidences : []).map((row:any) => {
+     const pageText = pageTextByNumber.get(Number(row?.page)) || '';
+     const quality = assessOcrExtractedPage(pageText);
+@@ -563,13 +569,31 @@
+       }
+     }
+     if (textLayer && textLayer.text.length >= 200 && textLayer.coverage_ratio >= 0.95) {
++      // Text-layer extraction already knows exactly which PDF pages yielded text.
++      // Preserve that text verbatim; do not pass it through OCR confidence/exclusion
++      // logic, which can shift page-block boundaries after an empty page.
++      const sourceQuality = {
++        status: (textLayer.empty_pages.length ? 'REVIEW_REQUIRED' : 'GOOD') as 'GOOD'|'REVIEW_REQUIRED',
++        minimum_analysis_confidence: ocrAnalysisThreshold(),
++        usable_pages: textLayer.pages_with_text,
++        low_confidence_pages: [] as number[],
++        excluded_pages: [...textLayer.empty_pages],
++        excluded_spans: 0,
++        repaired_spans: 0,
++        page_coverage: textLayer.coverage_ratio,
++        minimum_page_coverage: 0.95,
++        missing_pages: textLayer.empty_pages.length,
++        weak_content_pages: [] as number[],
++      };
+       return {
+         text: normalizeLegalText(textLayer.text),
+         mode: 'PDF_LOCAL_TEXT',
+         pages_total: textLayer.pages,
+         pages_ocr: textLayer.pages_with_text,
+         coverage_ratio: textLayer.coverage_ratio,
+-        manual_review_required: textLayer.coverage_ratio < 1,
++        manual_review_required: sourceQuality.status !== 'GOOD',
++        failed_pages: [...textLayer.empty_pages],
++        source_quality: sourceQuality,
+         warning: textLayer.empty_pages.length ? `Text-layer PDF tidak menghasilkan teks material pada halaman ${textLayer.empty_pages.join(', ')}; periksa halaman tersebut secara manual.` : undefined,
+       };
+     }
+
+--- /mnt/data/lexy_closure/base/server/evidenceModel.ts	2026-09-19 19:36:40.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/evidenceModel.ts	2026-09-20 23:02:40.000000000 +0000
+@@ -312,10 +312,10 @@
+   if(s.length<3||s.length>50)return false;
+   // Lexical integrity guard: legal drafting tokens, honorifics, and citation
+   // fragments are not standalone human actors even when capitalized.
+-  if(/^(?:Undang|Undang-Undang|Pasal|Ayat|Huruf|Nomor|No|Tahun|Surat|Sdri|Sdr|Tuan|Nyonya|Bapak|Ibu|Hj|H)$/i.test(s))return false;
++  if(/^(?:Undang|Undang-Undang|Pasal|Ayat|Huruf|Nomor|No|NIP|Tahun|Surat|Sdri|Sdr|Tuan|Nyonya|Bapak|Ibu|Hj|H|Bahwa|Demikian|Kandung|Setelah)$/i.test(s))return false;
+   if(/\b(?:Nomor|No|Pasal|Ayat|Surat|Edaran)\b/i.test(s))return false;
+   if(/^(?:Perumda|PT|CV|UD|Yayasan|Koperasi|Firma|BPR|Bank|Kejaksaan|Pengadilan)\b/i.test(s))return false;
+-  const fragmentWords=/\b(?:kepada|adalah|itu|sudah|dengan|tanpa|maka|yang|dan|atau|dari|sebagai|untuk|pada|dalam|akan|telah|bagi|oleh|bagian|para|setengah|disertipikatkan|dibagi|selesai|membatalkan|produknya|berupa|dimiliki|diperoleh|memberikan|menyatakan|mendalilkan|ahliw|anaknya|tersebut|merupakan|memiliki|menjadi|milik|berhak|memperoleh|dijaminkan|menipu|membuat|menyetujui)\b/i;
++  const fragmentWords=/\b(?:kepada|adalah|itu|sudah|dengan|tanpa|maka|yang|dan|atau|dari|sebagai|untuk|pada|dalam|akan|telah|setelah|bagi|oleh|bagian|para|setengah|kandung|nip|bahwa|demikian|disertipikatkan|dibagi|selesai|membatalkan|produknya|berupa|dimiliki|diperoleh|memberikan|menyatakan|mendalilkan|ahliw|anaknya|tersebut|merupakan|memiliki|menjadi|milik|berhak|memperoleh|dijaminkan|menipu|membuat|menyetujui)\b/i;
+   if(fragmentWords.test(s)||!/^[A-Z]/.test(s))return false;
+   const words=s.split(/\s+/).filter(Boolean);
+   if(!words.length||words.length>4)return false;
+@@ -325,6 +325,40 @@
+   return true;
+ }
+ 
++
++function trimCapturedPersonName(raw:string):string{
++  const tokens=String(raw||'').trim().split(/\s+/).filter(Boolean);
++  const out:string[]=[];
++  for(const token of tokens){
++    const bare=token.replace(/[,;:]+$/,'');
++    const isInitial=/^[A-Z]\.$/.test(bare);
++    const sentenceEnd=!isInitial && /[.!?]$/.test(bare);
++    const core=bare.replace(/[.!?]+$/,'');
++    if(!core) break;
++    if(!isInitial && !/^[A-ZÀ-Ý]/.test(core)) break;
++    if(/^(?:Bahwa|Demikian|Setelah|Kandung|NIP|Nomor|Pasal|Surat)$/i.test(core)) break;
++    out.push(isInitial?bare:core);
++    if(sentenceEnd||out.length>=5) break;
++  }
++  return clean(out.join(' '));
++}
++
++function trimCapturedOrganization(raw:string):string{
++  const tokens=String(raw||'').trim().split(/\s+/).filter(Boolean);
++  const out:string[]=[];
++  for(const token of tokens){
++    const bare=token.replace(/[,;:]+$/,'');
++    const core=bare.replace(/[.!?]+$/,'');
++    if(!core || /^(?:Bahwa|Demikian|Setelah|Dengan|Untuk)$/i.test(core)) break;
++    if(!/^[A-Z0-9À-Ý]/.test(core) && !/^(?:dan|of|the)$/i.test(core)) break;
++    out.push(/^(?:Tbk|Ltd|Inc)$/i.test(core)?`${core}.`:core);
++    if(/[.!?]$/.test(bare) && !/^(?:Tbk|Ltd|Inc)\.$/i.test(bare)) break;
++    if(/^(?:Tbk|Ltd|Inc)\.$/i.test(bare)) break;
++    if(out.length>=8) break;
++  }
++  return clean(out.join(' '));
++}
++
+ function resolveActorAliases(items:EvidenceActor[]):EvidenceActor[]{
+   const persons=items.filter(a=>a.entity_type==='PERSON').sort((a,b)=>(b.canonical_key||'').length-(a.canonical_key||'').length);
+   const absorbed=new Set<EvidenceActor>();
+@@ -377,11 +411,11 @@
+       }
+     }
+   }
+-  for(const p of pgs) for(const m of p.text.matchAll(/\bNama\s*[:\-]\s*([A-Z][A-Za-zÀ-ÿ.'-]*(?:\s+[A-Z][A-Za-zÀ-ÿ.'-]*){0,3})\b/g)){
+-    const name=clean(m[1]); if(isPlausiblePersonName(name))addActor(map,name,'NAMED_PERSON',p.page,m[0]);
++  for(const p of pgs) for(const m of p.text.matchAll(/\bNama\s*[:\-]\s*([A-Z](?:[A-Za-zÀ-ÿ'-]*|\.)(?:\s+[A-Z](?:[A-Za-zÀ-ÿ'-]*|\.)){0,4})\b/g)){
++    const name=trimCapturedPersonName(m[1]); if(isPlausiblePersonName(name))addActor(map,name,'NAMED_PERSON',p.page,m[0]);
+   }
+-  for(const p of pgs) for(const m of p.text.matchAll(/\b(?:Sdr\.?|Sdri\.?|Tuan|Nyonya|Bapak|Ibu|Hj\.?|H\.?)\s+([A-Z][A-Za-zÀ-ÿ.'-]*(?:\s+[A-Z][A-Za-zÀ-ÿ.'-]*){0,3})\b/g)){
+-    const name=clean(m[1]); if(isPlausiblePersonName(name))addActor(map,name,'NAMED_PERSON',p.page,m[0]);
++  for(const p of pgs) for(const m of p.text.matchAll(/\b(?:Sdr\.?|Sdri\.?|Tuan|Nyonya|Bapak|Ibu|Hj\.?|H\.?)\s+([A-Z](?:[A-Za-zÀ-ÿ'-]*|\.)(?:\s+[A-Z](?:[A-Za-zÀ-ÿ'-]*|\.)){0,4})\b/g)){
++    const name=trimCapturedPersonName(m[1]); if(isPlausiblePersonName(name))addActor(map,name,'NAMED_PERSON',p.page,m[0]);
+   }
+   // Explicit ownership/name-list pattern only. This intentionally does not
+   // generalize to arbitrary comma-separated capitalized text: it is scoped to
+@@ -403,13 +437,13 @@
+   // Resolve explicit role-to-person mentions without merging role-only actors by assumption.
+   // Example: "Terdakwa Drs. Elya Dwi Admoko, M.M." becomes one named PERSON
+   // carrying role=Terdakwa; a standalone word "Terdakwa" remains a ROLE entity.
+-  const roleNameRe=/\b(Penggugat|Tergugat|Pemohon|Termohon|Pelapor|Terlapor|Tersangka|Terdakwa|Debitur|Kreditur|Direktur(?:\s+Utama)?|Komisaris|Penuntut\s+Umum|Jaksa)\s+(?:(?:Drs?|Prof|Ir|H|Hj)\.?\s+)?([A-Z][A-Za-zÀ-ÿ.'-]*(?:\s+[A-Z][A-Za-zÀ-ÿ.'-]*){1,4})(?:,?\s+(?:S\.?H\.?|M\.?H\.?|M\.?M\.?|S\.?E\.?|M\.?Kn\.?))?/gi;
++  const roleNameRe=/\b(Penggugat|Tergugat|Pemohon|Termohon|Pelapor|Terlapor|Tersangka|Terdakwa|Debitur|Kreditur|Direktur(?:\s+Utama)?|Komisaris|Penuntut\s+Umum|Jaksa|Saksi|Notaris|Kuasa\s+Hukum)\s+(?:(?:Drs?|Prof|Ir|H|Hj)\.?\s+)?([A-Z](?:[A-Za-zÀ-ÿ'-]*|\.)(?:\s+[A-Z](?:[A-Za-zÀ-ÿ'-]*|\.)){1,4})(?:,?\s+(?:S\.?H\.?|M\.?H\.?|M\.?M\.?|S\.?E\.?|M\.?Kn\.?))?/gi;
+   for(const p of pgs) for(const m of p.text.matchAll(roleNameRe)){
+-    const role=clean(m[1]); const name=clean(m[2]);
++    const role=clean(m[1]); const name=trimCapturedPersonName(m[2]);
+     if(isPlausiblePersonName(name)) addActor(map,name,role,p.page,m[0]);
+   }
+-  for(const p of pgs) for(const m of p.text.matchAll(/\b(PT|CV|UD|Yayasan|Koperasi|Firma|Perumda)\.?\s+((?:[A-Z][A-Za-z0-9.'&\-]*\s*){1,6})/g)){
+-    const full=clean(`${m[1]} ${m[2]}`); if(full.length>=5&&full.length<=80)addActor(map,full,'BUSINESS_ENTITY',p.page,m[0]);
++  for(const p of pgs) for(const m of p.text.matchAll(/\b(PT|CV|UD|Yayasan|Koperasi|Firma|Perumda)\.?\s+((?:[A-Z][A-Za-z0-9'&\-]*\s*){1,6})/g)){
++    const full=trimCapturedOrganization(`${m[1]} ${m[2]}`); if(full.length>=5&&full.length<=80)addActor(map,full,'BUSINESS_ENTITY',p.page,m[0]);
+   }
+   const actionName=/\b([A-Z][a-zÀ-ÿ'-]{2,}(?:\s+[A-Z][a-zÀ-ÿ'-]{2,})?)\s+(?=(?:ditangkap|ditahan|menyewa|menjual|membeli|menggadaikan|mengalihkan|membayar|melaporkan|meminjam|menyerahkan|menguasai|menerima|menandatangani)\b)/g;
+   const relationName=/\b(?:milik|kepada|oleh|dari)\s+([A-Z][a-zÀ-ÿ'-]{2,}(?:\s+[A-Z][a-zÀ-ÿ'-]{2,})?)\b/g;
+@@ -417,6 +451,13 @@
+     const name=clean(m[1]); if(!isPlausiblePersonName(name))continue;
+     addActor(map,name,'NAMED_PARTY',p.page,sentenceAround(p.text,(m.index||0)));
+   }
++
++  // Party-definition form used heavily in pleadings: "NAME, selanjutnya disebut PENGGUGAT".
++  for(const p of pgs) for(const m of p.text.matchAll(/\b([A-ZÀ-Ý][A-ZÀ-Ýa-zà-ÿ.'-]*(?:\s+[A-ZÀ-Ý][A-ZÀ-Ýa-zà-ÿ.'-]*){1,4})\s*,?\s*selanjutnya\s+disebut(?:\s+sebagai)?\s+(PENGGUGAT|TERGUGAT|PEMOHON|TERMOHON|PELAPOR|TERLAPOR|TERSANGKA|TERDAKWA)\b/g)){
++    const name=trimCapturedPersonName(m[1]); const role=clean(m[2]);
++    if(isPlausiblePersonName(name)) addActor(map,name,role,p.page,m[0]);
++  }
++
+   const roleWordSet=new Set(roleWords.map(r=>r.toLowerCase()));
+   const filtered=[...map.values()].filter(a=>{
+     if(roleWordSet.has(a.actor.toLowerCase()))return true;
+@@ -441,12 +482,13 @@
+   const proceduralStageAction=/\b(?:somasi|mediasi|praperadilan|banding|kasasi|peninjauan\s+kembali)\s+(?:telah\s+)?(?:diajukan|didaftarkan|dilakukan|dilaksanakan|diputus|dimohonkan|diberikan|disampaikan|dikirimkan)\b/i;
+   const proceduralStageInverse=/\b(?:mengajukan|mendaftarkan|melakukan|melaksanakan|memohon|memohonkan|menyampaikan|mengirimkan|mengeluarkan)\s+(?:somasi|mediasi|praperadilan|banding|kasasi|peninjauan\s+kembali)\b/i;
+   const proceduralVerdict=/\b(?:putusan|amar\s+putusan)\s+(?:telah\s+)?(?:dibacakan|diputuskan|dijatuhkan|dikabulkan|ditolak|diucapkan)\b/i;
+-  if(proceduralAction.test(s)||proceduralDateContext.test(s)||proceduralFiling.test(s)||proceduralRegister.test(s)||proceduralStageAction.test(s)||proceduralStageInverse.test(s)||proceduralVerdict.test(s)) return 'PROCEDURAL_EVENT';
++  const bapExaminationDate=/\b(?:berita\s+acara\s+pemeriksaan|pemeriksaan\s+(?:dilakukan|terhadap|saksi|tersangka|terperiksa)|diperiksa\s+oleh\s+penyidik|penyidik[^.;]{0,100}\bmemeriksa\b(?:[^.;]{0,80}\b(?:saksi|tersangka|terperiksa)\b)?)\b/i;
++  if(proceduralAction.test(s)||proceduralDateContext.test(s)||proceduralFiling.test(s)||proceduralRegister.test(s)||proceduralStageAction.test(s)||proceduralStageInverse.test(s)||proceduralVerdict.test(s)||bapExaminationDate.test(s)) return 'PROCEDURAL_EVENT';
+ 
+   // A dated document can also describe a material legal/status transition.
+   // In a party-authored source that transition belongs in the claimed-event
+   // chronology, while a bare document/header date remains metadata.
+-  const materialDocumentEvent=/\b(?:pengunduran\s+diri|mengundurkan\s+diri|diangkat|pengangkatan|diberhentikan|pemberhentian|mencantumkan|tidak\s+mencantumkan|menghapus|dihapus|menambahkan|ditambahkan|mengubah|diubah|perubahan|direvisi|revisi)\b/i;
++  const materialDocumentEvent=/\b(?:pencairan\s+kredit|kredit\s+dicairkan|mencairkan\s+kredit|transfer\s+dana|dana\s+ditransfer|pengunduran\s+diri|mengundurkan\s+diri|diangkat|pengangkatan|diberhentikan|pemberhentian|mencantumkan|tidak\s+mencantumkan|menghapus|dihapus|menambahkan|ditambahkan|mengubah|diubah|perubahan|direvisi|revisi)\b/i;
+   if(materialDocumentEvent.test(s)) return 'CLAIMED_EVENT';
+ 
+   if(/\b(?:surat\s+kuasa|surat\s+keputusan|sk|akta|sertifikat\s+(?:nomor|tanggal)|kwitansi|perjanjian\s+(?:nomor|tanggal|tertanggal)|ditandatangani|bertanggal|tertanggal|nomor\s+surat|tanggal\s+surat)\b/i.test(s)) return 'DOCUMENT_DATE';
+
+--- /mnt/data/lexy_closure/base/server/exporters.ts	2026-09-20 06:51:10.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/exporters.ts	2026-09-20 23:13:07.000000000 +0000
+@@ -91,7 +91,7 @@
+   const rawStatus = String(g.status || '').toUpperCase();
+   if (!rawStatus) return 'UNKNOWN';
+   const score = Math.round(Number(g.score ?? analysis?.pipeline_gate?.score ?? 0));
+-  return `${rawStatus === 'READY' ? 'PASS' : 'FAIL'} - ${score}%`;
++  return `${rawStatus === 'READY' ? 'PASS' : rawStatus === 'DEGRADED' ? 'DEGRADED' : 'FAIL'} - ${score}%`;
+ }
+ function workingPaperReadinessScore(analysis: any): number {
+   return Math.max(0, Math.min(100, Math.round(Number(
+@@ -970,6 +970,8 @@
+   para('Ruang Lingkup', { bold: true, size: 12, firstLine: 0, justify: false });
+   para(lawyerFacingScope(analysis), { firstLine: 0 });
+   para(lawyerFacingReadinessNote(analysis), { firstLine: 0, color: '666666', size: 9.5 });
++  para(`Kesiapan Analisis: ${analysisReadinessLabel(analysis)}`, { firstLine: 0, bold: true, size: 10 });
++  if (analysis?.pipeline_gate?.status) para(`Status Gate Analisis: ${pipelineGateLabel(analysis)}`, { firstLine: 0, color: '666666', size: 9.5 });
+ 
+   heading('1', 'Ringkasan Eksekutif');
+   para(lawyerFacingExecutiveSummary(analysis));
+@@ -1173,6 +1175,8 @@
+   body.push(p('Ruang Lingkup', 'Heading2', { align: 'left' }));
+   body.push(p(lawyerFacingScope(analysis), undefined, { align: 'both' }));
+   body.push(p(lawyerFacingReadinessNote(analysis), undefined, { color: '666666', font: 'sans', size: 9.5, align: 'both' }));
++  body.push(p(`Kesiapan Analisis: ${analysisReadinessLabel(analysis)}`, undefined, { bold:true, font:'sans', size:10, align:'left' }));
++  if (analysis?.pipeline_gate?.status) body.push(p(`Status Gate Analisis: ${pipelineGateLabel(analysis)}`, undefined, { color:'666666', font:'sans', size:9.5, align:'left' }));
+ 
+   body.push(p('Daftar Isi', 'TOCHeading', { align: 'left' }));
+   body.push('<w:p><w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-2" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>Daftar isi akan diperbarui otomatis saat dokumen dibuka.</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>');
+
+--- /mnt/data/lexy_closure/base/server/forensicReasoner.ts	2026-09-19 19:36:40.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/forensicReasoner.ts	2026-09-20 23:01:08.000000000 +0000
+@@ -104,6 +104,20 @@
+   return scored.slice(0,3).map(x=>x.c);
+ }
+ 
++function statementHasIssueNexus(seed:EvidenceIssueSeed, statement:EvidenceStatement):boolean{
++  if(/^audit-|^open-world-|^adversarial-/i.test(String(seed.id||''))) return seed.pages.includes(statement.page);
++  if(!seed.pages.includes(statement.page)) return false;
++  const hay=clean(`${statement.statement} ${statement.quote}`).toLowerCase();
++  const direct=(seed.query_terms||[]).some(term=>{
++    const q=clean(term).toLowerCase();
++    return q.length>=5 && hay.includes(q);
++  });
++  if(direct) return true;
++  const issueTokens=tokenise(`${seed.issue} ${seed.basis}`).filter(t=>t.length>=6);
++  const hayTokens=new Set(tokenise(hay));
++  return issueTokens.some(t=>hayTokens.has(t));
++}
++
+ function strengthenIssues(
+   issues:EvidenceIssueSeed[],
+   facts:EvidenceStatement[],
+@@ -113,9 +127,9 @@
+ ):ForensicReasoningOutput['legal_issues']{
+   const out:ForensicReasoningOutput['legal_issues']=[];
+   for(const seed of issues){
+-    const fMatches=facts.filter(f=>seed.pages.includes(f.page)).slice(0,5);
+-    const cMatches=claims.filter(c=>seed.pages.includes(c.page)).slice(0,5);
+-    const sMatches=supporting.filter(c=>seed.pages.includes(c.page)).slice(0,3);
++    const fMatches=facts.filter(f=>statementHasIssueNexus(seed,f)).slice(0,5);
++    const cMatches=claims.filter(c=>statementHasIssueNexus(seed,c)).slice(0,5);
++    const sMatches=supporting.filter(c=>statementHasIssueNexus(seed,c)).slice(0,3);
+     const laws=relevantLawsForIssue(seed,lawCandidates);
+     const evidenceTags=[...fMatches.map(f=>tagFact(f.page,f.quote)),...sMatches.map(s=>tagSupport(s.page,s.quote)),...cMatches.map(c=>tagClaim(c.page,c.quote))];
+     const supportCount=fMatches.length+sMatches.length;
+
+--- /mnt/data/lexy_closure/base/server/lawyerWorkflow.ts	2026-09-19 21:37:44.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/lawyerWorkflow.ts	2026-09-21 01:27:29.468303884 +0000
+@@ -135,8 +135,20 @@
+       confidence:'MEDIUM',
+     };
+   }
+-  if(sourceRole==='DEFENSE_SUBMISSION_WITH_EXHIBITS'||/\btergugat\b|jawaban\s+tergugat/.test(t))return {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon atau pihak yang membantah klaim',confidence:'HIGH'};
+-  if(sourceRole==='COMPLAINT_OR_PETITION'||/\bpenggugat\b|\bpemohon\b|gugatan/.test(t))return {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon atau pihak yang mengajukan klaim',confidence:'MEDIUM'};
++  if(sourceRole==='DEFENSE_SUBMISSION_WITH_EXHIBITS')return {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon atau pihak yang membantah klaim',confidence:'HIGH'};
++  if(sourceRole==='COMPLAINT_OR_PETITION')return {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon atau pihak yang mengajukan klaim',confidence:'MEDIUM'};
++  // Outside a litigation-role source, mere mention or definition of party labels
++  // is not a representation signal. Prefer explicit counsel/self-identification;
++  // if both sides are merely defined, remain neutral instead of picking the first branch.
++  const counselDefense=/\b(?:kuasa\s+hukum|kami\s+selaku|bertindak\s+untuk\s+dan\s+atas\s+nama)\s+(?:para\s+)?tergugat\b/.test(t);
++  const counselPlaintiff=/\b(?:kuasa\s+hukum|kami\s+selaku|bertindak\s+untuk\s+dan\s+atas\s+nama)\s+(?:para\s+)?penggugat\b/.test(t);
++  if(counselDefense&&!counselPlaintiff) return {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon atau pihak yang membantah klaim',confidence:'MEDIUM'};
++  if(counselPlaintiff&&!counselDefense) return {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon atau pihak yang mengajukan klaim',confidence:'MEDIUM'};
++  const definedDefense=/\bselanjutnya\s+disebut\s+(?:sebagai\s+)?tergugat\b/.test(t);
++  const definedPlaintiff=/\bselanjutnya\s+disebut\s+(?:sebagai\s+)?penggugat\b/.test(t);
++  if(definedDefense!==definedPlaintiff) return definedDefense
++    ? {orientation:'CIVIL_DEFENSE',side:'Tergugat/Termohon yang teridentifikasi eksplisit; konfirmasi mandat representasi',confidence:'LOW'}
++    : {orientation:'CIVIL_PLAINTIFF',side:'Penggugat/Pemohon yang teridentifikasi eksplisit; konfirmasi mandat representasi',confidence:'LOW'};
+   if(/keputusan\s+tata\s+usaha|pejabat\s+tata\s+usaha|keberatan\s+administratif|banding\s+administratif/.test(t))return {orientation:'ADMINISTRATIVE_RESPONSE',side:'Pihak dalam sengketa/keberatan administratif',confidence:'MEDIUM'};
+   return {orientation:'GENERAL_COUNSEL_REVIEW',side:'Pihak yang memerlukan analisis dan strategi hukum',confidence:'LOW'};
+ }
+@@ -254,16 +266,20 @@
+       if(!finance.test(seg)) return true;
+       // Explicit absence statements are evidence that the module should stay off,
+       // not positive finance signals (e.g. "tidak ada kredit, pinjaman, agunan").
+-      if(/\b(?:tidak\s+ada|tanpa)\b[^.;]{0,220}(?:kredit|pinjaman|agunan|jaminan|transfer|transaksi\s+keuangan|bank|pembiayaan)/i.test(seg)) return false;
++      if(/\b(?:tidak\s+ada|tanpa)\s+(?:data\s+|bukti\s+|hubungan\s+)?(?:kredit|pinjaman|agunan|jaminan|transfer|transaksi(?:\s+keuangan)?|bank|pembiayaan)\b/i.test(seg)) return false;
+       return true;
+     })
+     .join(' . ');
+ }
+ 
+ function contextualFinancialDiscrepancies(text:string):string[]{
+-  const discrepancy=/tidak\s+sesuai|menyimpang|selisih|berbeda|belum\s+lengkap|tidak\s+lengkap|pemalsuan|palsu|anomali|temuan|data\s+tidak\s+benar/i;
++  const discrepancy=/tidak\s+sesuai|tidak\s+diulang|tidak\s+dilakukan|tanpa\s+(?:survei|survey|verifikasi)|pengurangan\s+provisi|menyimpang|selisih|berbeda|belum\s+lengkap|tidak\s+lengkap|pemalsuan|palsu|anomali|temuan|data\s+tidak\s+benar/i;
+   const finance=/kredit|pinjaman|utang|piutang|debitur|kreditur|angsuran|pelunasan|agunan|jaminan|fidusia|hak\s+tanggungan|dijaminkan|diagunkan|bpkb|rekening|transfer|pembayaran|pencairan|taksasi|appraisal|bank|bpr/i;
+-  return uniq(sentenceLikeSegments(text).filter(x=>discrepancy.test(x)&&finance.test(x))).slice(0,12);
++  const financeProcedure=/survei|survey|dokumen\s+administrasi|kelengkapan|analisa\s+kredit|analisis\s+kredit|\b5c\b|sop|verifikasi|lembar\s+fiat|approval|persetujuan|provisi|plafond|repayment\s+capacity|kepatuhan/i;
++  // Called only after a strong financial core has been established. Operational
++  // deviations may therefore be material even when the sentence itself omits
++  // the word "kredit" (e.g. "survei tidak diulang" / "dokumen belum lengkap").
++  return uniq(sentenceLikeSegments(text).filter(x=>discrepancy.test(x)&&(finance.test(x)||financeProcedure.test(x)))).slice(0,12);
+ }
+ 
+ function buildFinancialSignalProfile(text:string):FinancialSignalProfile{
+@@ -347,6 +363,14 @@
+   return false;
+ }
+ 
++function isOperationalFactWitnessCandidate(a:any):boolean {
++  const hay=actorRoleText(a);
++  // Material operational roles can be fact witnesses even when the source does
++  // not literally label them "saksi". Keep this narrow: require a concrete
++  // process/verification role, not merely corporate seniority or party status.
++  return /kabag|kepala\s+bagian|tim\s+kredit|account\s+officer|analis(?:is)?\s+kredit|surveyor|petugas\s+survei|staf\s+kredit|legal|compliance|kepatuhan|spi|audit(?:or)?\s+internal|pemasaran/i.test(hay);
++}
++
+ function isPartyCounselOrRepresentativeOnly(a:any):boolean {
+   const hay=actorRoleText(a);
+   const excluded=/\b(?:penggugat|tergugat|pemohon|termohon|penggugat\s+rekonvensi|tergugat\s+rekonvensi|pemberi\s+kuasa|penerima\s+kuasa|kuasa\s+hukum|advokat|pengacara|klien|janda|duda|suami|istri|ahli\s+waris)\b/i.test(hay);
+@@ -412,7 +436,7 @@
+     // they appear in the actor matrix. Parties, counsel, representatives and
+     // family-status labels are excluded unless the source explicitly identifies
+     // a witness/expert/custodian/procedural role.
+-    .filter((a:any)=>isExplicitWitnessCandidate(a) && !isPartyCounselOrRepresentativeOnly(a))
++    .filter((a:any)=>(isExplicitWitnessCandidate(a) || isOperationalFactWitnessCandidate(a)) && !isPartyCounselOrRepresentativeOnly(a))
+     .slice(0, 12)
+     .map((a: any) => {
+       const roles = arr(a?.roles).map(clean).filter(Boolean);
+
+--- /mnt/data/lexy_closure/base/server/legalOntology.ts	2026-09-20 09:37:58.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/legalOntology.ts	2026-09-20 23:03:27.000000000 +0000
+@@ -210,10 +210,6 @@
+     return document && integrity;
+   }
+ 
+-  if(id==='formal-status') {
+-    return /kepengurusan|pengurus|direktur|komisaris|jabatan[^.;]{0,80}(?:sah|tidak\s+sah|dipersoalkan|diberhentikan)|anggaran\s+dasar|anggaran\s+rumah\s+tangga|\bAD\/ART\b/i.test(scoped);
+-  }
+-
+   if(id==='remedy-procedure') {
+     // A bare procedural noun in the body is not enough.  Pleadings routinely
+     // quote prior somasi, execution threats, appeals, seizures, or other stages.
+@@ -226,6 +222,40 @@
+     return explicitControversy || appealAct || executionAct || prelitAct;
+   }
+ 
++  if(id==='competing-disposition') {
++    const disposition=/\b(?:menjual|dijual|mengalihkan|dialihkan|menawarkan|ditawarkan|menyewakan|disewakan|menggadaikan|digadaikan)\b/i.test(scoped);
++    const competingNexus=/\b(?:pihak\s+ketiga|pihak\s+lain|orang\s+lain|objek\s+yang\s+sama|tanah\s+sengketa|barang\s+yang\s+sama)\b/i.test(scoped);
++    const transactionalObject=/\b(?:tanah|objek|barang|kendaraan|hak|sertifikat|rumah|aset)\b/i.test(scoped);
++    return disposition && competingNexus && transactionalObject;
++  }
++
++  if(id==='asset-disposition-authority') {
++    const disposition=/\b(?:menggadaikan|digadaikan|menyewakan|disewakan|menjual|dijual|mengalihkan|dialihkan)\b/i.test(scoped);
++    const authorityNexus=/\b(?:tanpa\s+izin|tanpa\s+persetujuan|tidak\s+berwenang|kewenangan|barang\s+milik\s+orang\s+lain|pihak\s+ketiga|pihak\s+lain|rantai\s+(?:penguasaan|transaksi)|pemilik)\b/i.test(scoped);
++    const propertyNexus=/\b(?:barang|kendaraan|tanah|objek|aset|jaminan|agunan)\b/i.test(scoped);
++    const merePaymentTransfer=/\b(?:dana|kredit|pembayaran)\b[^.;]{0,100}\b(?:ditransfer|ditransferkan|dibayarkan)\b[^.;]{0,100}\b(?:rekening|vendor|penerima)\b/i.test(scoped) && !disposition;
++    return disposition && authorityNexus && propertyNexus && !merePaymentTransfer;
++  }
++
++  if(id==='civil-criminal-boundary') {
++    const criminalFact=/\b(?:ditipu|penipuan|penggelapan|merusak|menghilangkan|menguasai\s+tanpa\s+hak|mengalihkan\s+tanpa\s+(?:hak|izin)|memalsukan|pemalsuan)\b/i.test(scoped);
++    const civilFact=/\b(?:wanprestasi|ingkar\s+janji|perjanjian|kontrak|prestasi|utang|piutang|ganti\s+rugi|perbuatan\s+melawan\s+hukum|pmh)\b/i.test(scoped);
++    const explicitBoundary=/\b(?:perdata\s+atau\s+pidana|pidana\s+atau\s+perdata|unsur\s+pidana|laporan\s+pidana|proses\s+pidana)\b/i.test(scoped);
++    return explicitBoundary || (criminalFact && civilFact);
++  }
++
++  if(id==='formal-status') {
++    const formal=/\b(?:kepengurusan|pengurus|jabatan|direktur|komisaris|ketua|sekretaris|bendahara|status\s+formal)\b/i.test(scoped);
++    const disputed=/\b(?:tidak\s+sah|dipersoalkan|diberhentikan|pemberhentian|pengangkatan|diangkat|diganti|penggantian|kewenangan|anggaran\s+dasar|anggaran\s+rumah\s+tangga|AD\/ART)\b/i.test(scoped);
++    return formal && disputed;
++  }
++
++  if(id==='corporate-authority') {
++    const corporate=/\b(?:perseroan|direksi|direktur|komisaris|rups|saham|pemegang\s+saham)\b/i.test(scoped);
++    const authority=/\b(?:kewenangan|berwenang|tidak\s+berwenang|persetujuan|tanpa\s+persetujuan|rups|anggaran\s+dasar|tindakan\s+korporasi|mewakili\s+perseroan)\b/i.test(scoped);
++    return corporate && authority;
++  }
++
+   if(id==='estate-asset-protection') {
+     // Mere mention of a certificate/document is not an asset-protection issue.
+     // Require a concrete risk to possession, transfer, encumbrance, loss or damage.
+
+--- /mnt/data/lexy_closure/base/server/proceduralPosture.ts	2026-09-19 21:37:44.000000000 +0000
++++ /mnt/data/lexy_closure/work/server/proceduralPosture.ts	2026-09-20 23:02:40.000000000 +0000
+@@ -57,13 +57,14 @@
+   { stage:'EVIDENCE_HEARING', label:'daftar pertanyaan saksi', re:/\bdaftar\s+pertanyaan\s+saksi\b/i },
+ 
+   { stage:'PRE_LITIGATION', label:'surat somasi', re:/\bsurat\s+somasi\b/i },
+-  { stage:'PRE_LITIGATION', label:'somasi', re:/\bsomasi\b/i },
++  { stage:'PRE_LITIGATION', label:'somasi', re:/^\s*somasi(?:\s+(?:pertama|kedua|ketiga|terakhir|wanprestasi))?\b/i },
+   { stage:'PRE_LITIGATION', label:'surat teguran', re:/\bsurat\s+teguran\b/i },
+   { stage:'PRE_LITIGATION', label:'surat keberatan', re:/\bsurat\s+keberatan\b/i },
+   { stage:'PRE_LITIGATION', label:'legal notice', re:/\blegal\s+notice\b/i },
+   { stage:'PRE_LITIGATION', label:'undangan mediasi', re:/\bundangan\s+mediasi\b/i },
+ 
+   { stage:'PLEADING', label:'surat gugatan', re:/\bsurat\s+gugatan\b/i },
++  { stage:'PLEADING', label:'gugatan', re:/^\s*gugatan\b/i },
+   { stage:'PLEADING', label:'repliek', re:/\brepliek\b/i },
+   { stage:'PLEADING', label:'replik', re:/\breplik\b/i },
+   { stage:'PLEADING', label:'duplik', re:/\bduplik\b/i },
+@@ -114,7 +115,9 @@
+     const index=found>=0?found:idx*100;
+     cursor=Math.max(cursor,index+line.length);
+     const compact=line.replace(/\s+/g,' ').trim();
+-    const looksHeading=compact.length<=220 || /^[A-Z0-9 .,:;()\/-]{5,220}$/.test(compact);
++    const allCaps=/^[A-Z0-9 .,:;()\/-]{5,220}$/.test(compact);
++    const shortIdentityLine=compact.length<=120 && !/[.!?].{8,}$/u.test(compact) && !/\b(?:telah|pernah|sebelumnya|bahwa|menyatakan|mendalilkan|mengirimkan|dikirimkan)\b/i.test(compact);
++    const looksHeading=allCaps || shortIdentityLine;
+     if(looksHeading) out.push({line:compact,index});
+   }
+   // OCR can collapse the opening into a single long line. Preserve only the
+@@ -193,7 +196,7 @@
+   const sourceRole=clean(input.sourceRole);
+ 
+   const identity=resolveDocumentIdentity(title,text);
+-  if(identity) return {stage:identity.stage,tier:'T1_DOCUMENT_IDENTITY',confidence:'HIGH',evidence:`document identity: ${identity.label}`};
++  if(identity && !isHistoricalOrQuoted(text, Math.max(0, identity.index))) return {stage:identity.stage,tier:'T1_DOCUMENT_IDENTITY',confidence:'HIGH',evidence:`document identity: ${identity.label}`};
+ 
+   const action=resolveCurrentAction(text);
+   if(action) return {stage:action.stage,tier:'T2_CURRENT_ACTION',confidence:'HIGH',evidence:`current procedural action: ${action.label}`};

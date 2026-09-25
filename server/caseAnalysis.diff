@@ -1,0 +1,84 @@
+--- /home/claude/lexy_v8/server/caseAnalysis.ts	2026-09-21 14:55:55.000000000 +0000
++++ /home/claude/lexy_v8work/server/caseAnalysis.ts	2026-09-24 06:39:32.994691386 +0000
+@@ -35,7 +35,7 @@
+   existing_case_id?: number;
+ }
+ 
+-type ApplicableLaw = { domain:string;source:string;status:string;regulation:string;article:string;relevance:string;source_url?:string;verification_status?:string;tempus_status?:string;authority_identity?:string;index_backed?:boolean };
++type ApplicableLaw = { domain:string;source:string;status:string;regulation:string;article:string;relevance:string;source_url?:string;verification_status?:string;tempus_status?:string;authority_identity?:string;index_backed?:boolean;article_text_pool?:string;instrument_type?:string;number?:string;year?:number };
+ type RegulatoryMode = 'offline' | 'hybrid' | 'online';
+ 
+ function normalizeRegulatoryMode(value: unknown): RegulatoryMode {
+@@ -146,7 +146,7 @@
+         if (a) articles.push(safeString(a[0]));
+       }
+     }
+-    out.push({ domain:'Rujukan eksplisit dokumen', source:reg, status:'SOURCE_CITED_UNVERIFIED', regulation:reg, article: unique(articles).slice(0,8).join(', ') || 'PERLU VERIFIKASI', relevance:'Rujukan disebut langsung dalam dokumen sumber. Identitas instrumen, versi pada tempus perkara, bunyi pasal, dan penerapannya tetap harus diverifikasi.' });
++    out.push({ domain:'Rujukan eksplisit dokumen', source:reg, status:'SOURCE_CITED_UNVERIFIED', regulation:reg, article: unique(articles).slice(0,8).join(', ') || 'PERLU VERIFIKASI', relevance:'Rujukan disebut langsung dalam dokumen sumber. Identitas instrumen, versi pada tempus perkara, bunyi pasal, dan penerapannya tetap harus diverifikasi.', authority_identity:authorityIdentityKey({source_kind:'LOCAL',instrument_type:safeString(m[1]),number:safeString(m[2]),year:Number(m[3]),source_label:reg}), article_text_pool:safeString(local), instrument_type:safeString(m[1]), number:safeString(m[2]), year:Number(m[3]) });
+   }
+   return out.slice(0, 16);
+ }
+@@ -1432,6 +1432,17 @@
+ ]);
+ 
+ function inferProceduralAuthorityFamily(c:BindableCandidate):AuthorityProceduralStage|'GENERAL_PROCEDURE'|'SUBSTANTIVE'{
++  // A judicial decision or determination is the *output* of a case, not an
++  // instrument that itself occupies a procedural stage. Classifying it by
++  // scanning its own substantive discussion content for stage vocabulary
++  // (e.g. a wanprestasi judgment that discusses "somasi" only because that
++  // was part of the claim being decided) misfiles the whole decision into
++  // that earlier stage's family and then blocks it from binding anywhere.
++  // The instrument's own title is checked first and wins over any
++  // content-derived signal below.
++  const titleHay=normalizeSearchToken(`${c.title||''} ${c.instrument_type||''}`);
++  if(/\bputusan\b|\bpenetapan\b/.test(titleHay)) return 'SUBSTANTIVE';
++
+   const hay=normalizeSearchToken(`${c.title||''} ${(c.domain_tags||[]).join(' ')} ${c.article_text_pool||''} ${c.instrument_type||''}`);
+   if(/\beksekusi\b|\baanmaning\b|sita eksekusi|pelelangan/.test(hay)) return 'EXECUTION';
+   if(/\bbanding\b|\bkasasi\b|peninjauan kembali|\bverzet\b|memori banding|memori kasasi/.test(hay)) return 'APPEAL';
+@@ -2216,6 +2227,45 @@
+   const tactical_strategy = reasoning.tactical_strategy;
+   const facts = reasoning.facts;
+   const bindingPool:BindableCandidate[] = [
++    ...sourceLawCitations.map((c)=>{
++      // A citation the source document itself quotes as the charging/applicable
++      // article (e.g. "Pasal 603 Undang-Undang ... Nomor 1 Tahun 2023 tentang
++      // KUHP") was previously merged straight into applicable_law and then
++      // immediately stripped back out by filterApplicableLawToBoundAuthorities,
++      // because it never went through bindIssuesToAuthorities in the first
++      // place - it was included by name, not by binding. That meant an
++      // explicitly-charged statute could silently vanish from the final
++      // legal-framework table whenever it happened to differ from whatever
++      // the local corpus/online retrieval separately matched. Feeding it into
++      // the same binding pool as every other candidate lets it stand or fall
++      // on the same domain/family/regime materiality gates - it does not
++      // grant it a free pass, only a fair chance to be evaluated at all.
++      const hay=normalizeSearchToken(`${c.regulation||''} ${c.article_text_pool||''}`);
++      let primary=0, secondary=0, foreign=0;
++      for (const a of domainRankingContext.primary_anchors) if (a.length>=4 && hay.includes(a)) primary++;
++      for (const a of domainRankingContext.secondary_anchors) if (a.length>=4 && hay.includes(a)) secondary++;
++      for (const a of domainRankingContext.foreign_anchors) if (a.length>=4 && hay.includes(a)) foreign++;
++      const domain_alignment:'PRIMARY'|'SECONDARY'|'NEUTRAL'|'FOREIGN' =
++        primary>0 ? 'PRIMARY' : secondary>0 ? 'SECONDARY' : foreign>0 ? 'FOREIGN' : 'NEUTRAL';
++      return {
++        title:safeString(c.regulation),
++        source_kind:'LOCAL' as const,
++        source_label:safeString(c.regulation),
++        article_summary:safeString(c.article),
++        domain_tags:[] as string[],
++        article_text_pool:safeString(c.article_text_pool||''),
++        material_confidence:'MEDIUM' as const,
++        citation_hit:true,
++        regime_note:null,
++        domain_alignment,
++        instrument_type:c.instrument_type,
++        number:c.number,
++        year:c.year,
++        effective_status:'SOURCE_CITED_UNVERIFIED',
++        tempus_status:(tempusYear && c.year && Number(c.year) > tempusYear ? 'POTENTIALLY_INCOMPATIBLE' : tempusYear && c.year ? 'POTENTIALLY_COMPATIBLE' : 'UNVERIFIED') as 'UNVERIFIED'|'POTENTIALLY_COMPATIBLE'|'POTENTIALLY_INCOMPATIBLE',
++        authority_identity:c.authority_identity||authorityIdentityKey({source_kind:'LOCAL',instrument_type:c.instrument_type,number:c.number,year:c.year,source_label:safeString(c.regulation)}),
++      };
++    }),
+     ...matchedRegs.map((m:any)=>{
+       const reg=m.regulation||{};
+       const articles=(reg.articles||[]) as Array<{ pasal?:string; topic?:string; content?:string; keywords?:string[] }>;

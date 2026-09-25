@@ -1,0 +1,115 @@
+--- /home/claude/lexy_final/server/officialLawRetriever.ts	2026-09-19 19:36:40.000000000 +0000
++++ /home/claude/lexy_v8work/server/officialLawRetriever.ts	2026-09-22 23:08:34.603160253 +0000
+@@ -1,5 +1,31 @@
+ import { authorityAnchorsForContext, officialQueriesForContext, coreInstrumentQueriesForContext } from './legalOntology';
+ import { searchOfficialAuthorityIndex, officialAuthorityIndexStats } from './officialAuthorityIndex';
++
++// A single official-source lookup is a network round-trip to an external
++// government site (fetchText, 8-9s timeout each). Earlier revisions issued
++// these one at a time in a plain for-await loop with no cross-item
++// dependency, so a case needing 10-16 lookups could take minutes of pure
++// sequential network wait even though every lookup is independent. This
++// bounded-concurrency runner preserves result order (so downstream
++// diagnostics/selection logic sees the exact same sequence it always did)
++// while letting a small number of lookups be in flight at once, instead of
++// firing every request at once (which would be impolite to the external
++// site) or one at a time (which is what caused the multi-minute waits).
++async function runWithConcurrency<T,R>(items:T[], limit:number, task:(item:T,index:number)=>Promise<R>):Promise<R[]>{
++  const results:R[]=new Array(items.length);
++  let next=0;
++  async function worker(){
++    while(true){
++      const i=next++;
++      if(i>=items.length) return;
++      results[i]=await task(items[i],i);
++    }
++  }
++  const workerCount=Math.max(1,Math.min(limit,items.length));
++  await Promise.all(Array.from({length:workerCount},()=>worker()));
++  return results;
++}
++
+ export type RegulatoryMode = 'offline' | 'hybrid' | 'online';
+ export type OfficialSourceStrategy = 'auto' | 'manual' | 'manual_plus_auto';
+ 
+@@ -1684,11 +1710,14 @@
+   const searchDiagnostics:Array<Record<string,unknown>>=[];
+   const candidateDiagnostics:Array<Record<string,unknown>>=[];
+ 
+-  for(const query of providerPlan.regulation_queries){
++  const searchOutcomes=await runWithConcurrency(providerPlan.regulation_queries,4,async(query)=>{
+     const searchUrl=`https://peraturan.bpk.go.id/Search?keywords=${encodeURIComponent(query)}`;
+     const res=await fetchText(searchUrl,9000);
+     const links=res.ok?parseBpkSearch(res.text,query,8):[];
+     const firstHrefMatch=res.text.match(/href=["']([^"']*\/Details\/[^"']*)["']/i);
++    return {query,res,links,firstHrefMatch};
++  });
++  for(const {query,res,links,firstHrefMatch} of searchOutcomes){
+     searchDiagnostics.push({
+       query:query.slice(0,120),
+       fetch_ok:res.ok,
+@@ -1769,8 +1798,8 @@
+ 
+   const candidates:OfficialLawCandidate[]=[];
+ 
+-  for(const item of selected){
+-    const detail=await fetchText(item.url,9000);
++  const detailFetches=await runWithConcurrency(selected,4,async(item)=>({item,detail:await fetchText(item.url,9000)}));
++  for(const {item,detail} of detailFetches){
+     if(!detail.ok){
+       const id=inferInstrumentIdentity(item.title) as any;
+       candidateDiagnostics.push({stage:'detail_fetch',result:'UNREACHABLE',query:item.query.slice(0,100),title:item.title.slice(0,140),status:detail.status,error:detail.error||''});
+@@ -1840,12 +1869,16 @@
+     });
+   }
+ 
+-  const judicialProducts=await discoverJudicialProviderCandidates({
+-    provider:'JDIH_MA',domain:input.domain||'',caseText:input.caseText||'',queries:providerPlan.judicial_product_queries,tempusYear:input.tempusYear,maxCandidates:3,
+-  });
+-  const caseLaw=await discoverJudicialProviderCandidates({
+-    provider:'PUTUSAN_MA',domain:input.domain||'',caseText:input.caseText||'',queries:providerPlan.case_law_queries,tempusYear:input.tempusYear,maxCandidates:4,
+-  });
++  const judicialAndCaseLaw=await Promise.all([
++    discoverJudicialProviderCandidates({
++      provider:'JDIH_MA',domain:input.domain||'',caseText:input.caseText||'',queries:providerPlan.judicial_product_queries,tempusYear:input.tempusYear,maxCandidates:3,
++    }),
++    discoverJudicialProviderCandidates({
++      provider:'PUTUSAN_MA',domain:input.domain||'',caseText:input.caseText||'',queries:providerPlan.case_law_queries,tempusYear:input.tempusYear,maxCandidates:4,
++    }),
++  ]);
++  const judicialProducts=judicialAndCaseLaw[0];
++  const caseLaw=judicialAndCaseLaw[1];
+   candidates.push(...judicialProducts.candidates,...caseLaw.candidates);
+ 
+   const canonical=new Map<string,OfficialLawCandidate>();
+@@ -2379,16 +2412,22 @@
+ 
+   const manualEnabled=strategy==='manual'||strategy==='manual_plus_auto';
+   const autoEnabled=strategy==='auto'||strategy==='manual_plus_auto';
+-  const manual=manualEnabled?await resolveManualAuthorities(input.manualAuthorities,input.tempusYear):{candidates:[],resolutions:[]};
+-  const auto=autoEnabled
+-    ? await discoverAutoOfficialLaw({mode:input.mode,queries:input.queries,tempusYear:input.tempusYear,maxCandidates:input.maxCandidates,domain:input.domain,caseText:input.caseText})
+-    : {mode:input.mode,queries:[] as string[],candidates:[] as OfficialLawCandidate[],providers:[{name:'JDIH_BPK',status:'MANUAL_SCOPE',query_count:0}],notes:['Auto-discovery dinonaktifkan oleh strategi sumber manual.']} as OfficialLawRetrievalResult;
+-
+   const normalizedCanonicalSeeds = normalizeCanonicalAuthorities(input.canonicalAuthorities || []);
+   const seedEnabled = normalizedCanonicalSeeds.length > 0;
+-  const seed = seedEnabled
+-    ? await resolveCanonicalSeeds(input.mode, normalizedCanonicalSeeds, input.tempusYear)
+-    : { candidates: [], attempts: [] as Array<{ seed: CanonicalSeed; attempts: ExactProviderAttempt[] }> };
++  // These three sources are independent of each other (manual URLs/citations
++  // the user pasted in, a canonical corpus seed, and keyword auto-discovery)
++  // and are only merged afterward by candidateCanonicalKey precedence below,
++  // so there is no ordering dependency that requires awaiting them one at a
++  // time; running them concurrently only shortens wall-clock time.
++  const [manual,auto,seed]=await Promise.all([
++    manualEnabled?resolveManualAuthorities(input.manualAuthorities,input.tempusYear):Promise.resolve({candidates:[],resolutions:[]}),
++    autoEnabled
++      ? discoverAutoOfficialLaw({mode:input.mode,queries:input.queries,tempusYear:input.tempusYear,maxCandidates:input.maxCandidates,domain:input.domain,caseText:input.caseText})
++      : Promise.resolve({mode:input.mode,queries:[] as string[],candidates:[] as OfficialLawCandidate[],providers:[{name:'JDIH_BPK',status:'MANUAL_SCOPE',query_count:0}],notes:['Auto-discovery dinonaktifkan oleh strategi sumber manual.']} as OfficialLawRetrievalResult),
++    seedEnabled
++      ? resolveCanonicalSeeds(input.mode, normalizedCanonicalSeeds, input.tempusYear)
++      : Promise.resolve({ candidates: [], attempts: [] as Array<{ seed: CanonicalSeed; attempts: ExactProviderAttempt[] }> }),
++  ]);
+ 
+   const combined=new Map<string,OfficialLawCandidate>();
+   // Priority: manual user selection > canonical corpus seed > keyword auto-discovery.

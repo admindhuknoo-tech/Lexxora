@@ -1,0 +1,15 @@
+--- a/server/officialLawRetriever.ts
++++ b/server/officialLawRetriever.ts
+@@ -43,9 +43,9 @@
+   decision_date?: string;
+   source_tier?: 'PRIMARY_OFFICIAL'|'SECONDARY_OFFICIAL';
+   discovery_context?: string;
+-  // Real document-tag metadata (e.g. OFFICIAL_INDEX entry.keywords), never
+-  // filtered through or derived from the search query. See discovery_context
+-  // below for why this distinction matters.
++  // Catalog/retrieval metadata (e.g. OFFICIAL_INDEX entry.keywords). It may
++  // improve discovery/diagnostics but MUST NOT be treated as authority substance
++  // by downstream issue-binding gates.
+   keywords?: string[];
+   verification_state?: 'VERIFIED_OFFICIAL'|'INDEXED_OFFICIAL'|'VERIFY_BLOCKED';
+ }

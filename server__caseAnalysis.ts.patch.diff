@@ -1,0 +1,170 @@
+--- a/server/caseAnalysis.ts
++++ b/server/caseAnalysis.ts
+@@ -753,18 +753,27 @@
+   if (!hay) return { score: 0, matched: false };
+ 
+   let score = 0;
++  // `matched` is deliberately issue-specific. Domain anchors may re-rank an
++  // article that already answers the issue, but they can no longer create a
++  // false article-level nexus on their own. This prevents broad labels such as
++  // "perkawinan" or "pertanahan" from being emitted as "pasal relevan"
++  // when the article does not contain the issue's substantive terms.
+   let matched = false;
+ 
+-  for (const raw of issueTerms) {
+-    const t = normalizeSearchToken(raw);
+-    if (t.length < 4 || !hay.includes(t)) continue;
+-    matched = true;
+-    score += t.includes(' ') ? 8 : 4;
++  const normalizedIssueTerms=unique(issueTerms.map(normalizeSearchToken).filter(t=>t.length>=4));
++  const hasSpecificPhrase=normalizedIssueTerms.some(t=>t.includes(' '));
++  for (const t of normalizedIssueTerms) {
++    if (!hay.includes(t)) continue;
++    // When the issue supplies specific multi-word concepts, a generic single
++    // domain word may help rank but cannot by itself establish article nexus.
++    // Example: "perkawinan" must not make divorce/validity categories count
++    // as the relevant article for an issue specifically about harta bersama.
++    if (t.includes(' ') || !hasSpecificPhrase) matched = true;
++    score += t.includes(' ') ? 8 : 2;
+   }
+   for (const raw of anchors) {
+     const a = normalizeSearchToken(raw);
+     if (a.length < 4 || !hay.includes(a)) continue;
+-    matched = true;
+     score += a.includes(' ') ? 4 : 2;
+   }
+ 
+@@ -888,7 +897,7 @@
+     secondary_aligned,
+     foreign_aligned,
+     domain_alignment,
+-    ranked_articles: rankedArticles.filter((x:any) => x.score > 0).slice(0, 5).map((x:any) => x.article),
++    ranked_articles: rankedArticles.filter((x:any) => x.matched && x.score > 0).slice(0, 5).map((x:any) => x.article),
+   };
+ }
+ 
+@@ -1331,6 +1340,35 @@
+   return false;
+ }
+ 
++
++const LOCAL_ISSUES_REQUIRING_ARTICLE_NEXUS = new Set([
++  'remedy-procedure',
++  'civil-criminal-boundary',
++  'capacity-authority',
++  'document-authenticity',
++  'power-of-attorney',
++]);
++
++function issueAuthorityCompatible(issueId:string,c:BindableCandidate):{ok:boolean;reason?:string}{
++  const title=normalizeSearchToken(c.title||'');
++  const tags=normalizeSearchToken((c.domain_tags||[]).join(' '));
++  const article=normalizeSearchToken(c.article_text_pool||'');
++  const hay=`${title} ${tags}`;
++
++  if(issueId==='remedy-procedure'){
++    const proceduralTitle=/hukum acara|peradilan|pengadilan|kekuasaan kehakiman|mahkamah|kompetensi|upaya hukum|banding|kasasi|eksekusi|sita/.test(hay);
++    const proceduralArticle=/hukum acara|tenggang|kompetensi|kewenangan mengadili|banding|kasasi|verzet|eksekusi|sita/.test(article);
++    if(!proceduralTitle && !proceduralArticle) return {ok:false,reason:'isu prosedural tidak boleh diikat ke authority substantif tanpa nexus hukum-acara yang nyata'};
++  }
++
++  if(issueId==='civil-criminal-boundary'){
++    const boundary=/perdata.*pidana|pidana.*perdata|kualifikasi.*pidana|unsur pidana|wanprestasi.*pidana|pmh.*pidana/.test(`${hay} ${article}`);
++    if(!boundary && c.source_kind==='LOCAL') return {ok:false,reason:'isu batas perdata-pidana memerlukan authority/article yang secara nyata membahas boundary; authority satu-sisi saja tidak cukup'};
++  }
++
++  return {ok:true};
++}
++
+ function bindIssuesToAuthorities(
+   issues:any[],
+   ontologyIssues:Array<{ question?:string; issue?:string; id:string; query_terms:string[]; domain:string }>,
+@@ -1414,6 +1452,15 @@
+         continue;
+       }
+ 
++      // GATE 2.5 — issue-family compatibility. A topical overlap is not enough
++      // when the issue itself asks a procedural or cross-regime question.
++      const issueCompat=issueAuthorityCompatible(meta.id,c);
++      if(!issueCompat.ok){
++        const rej=((c as any).__issue_family_rejections ||= []);
++        if(rej.length<24) rej.push({issue:meta.id,reason:issueCompat.reason});
++        continue;
++      }
++
+       const titleHay=normalizeSearchToken(c.title);
+       const tagsHay=normalizeSearchToken((c.domain_tags||[]).join(' '));
+       const artHay=normalizeSearchToken(c.article_text_pool||'');
+@@ -1592,6 +1639,14 @@
+         }
+       }
+ 
++      // Broad cross-cutting issues fail closed on LOCAL authorities unless an
++      // issue-specific article actually survived the per-issue article ranking.
++      if(c.source_kind==='LOCAL' && LOCAL_ISSUES_REQUIRING_ARTICLE_NEXUS.has(meta.id) && !issueArticleSummary){
++        const rej=((c as any).__article_nexus_rejections ||= []);
++        if(rej.length<24) rej.push({issue:meta.id,reason:'local authority rejected: no issue-specific article nexus'});
++        continue;
++      }
++
+       if (binding_score < 6) continue;
+ 
+       scored.push({
+@@ -1694,6 +1749,41 @@
+   return filtered;
+ }
+ 
++function enrichApplicableLawFromIssueBindings(items:ApplicableLaw[],issues:any[]):ApplicableLaw[]{
++  const byIdentity=new Map<string,{issueLabels:string[];articles:string[];matched:string[]}>();
++  for(const issue of issues||[]){
++    const issueLabel=safeString(issue?.issue);
++    for(const b of ((issue as any)?.bound_authorities||[])){
++      const id=safeString((b as any)?.authority_identity||'');
++      if(!id) continue;
++      const row=byIdentity.get(id)||{issueLabels:[],articles:[],matched:[]};
++      if(issueLabel && !row.issueLabels.includes(issueLabel)) row.issueLabels.push(issueLabel);
++      const art=safeString((b as any)?.article_summary||'');
++      if(art) for(const a of art.split(',').map(x=>x.trim()).filter(Boolean)) if(!row.articles.includes(a)) row.articles.push(a);
++      for(const m of ((b as any)?.matched_terms||[]).map((x:any)=>safeString(x)).filter(Boolean)) if(!row.matched.includes(m)) row.matched.push(m);
++      byIdentity.set(id,row);
++    }
++  }
++  return items.map(item=>{
++    const id=safeString((item as any)?.authority_identity||'');
++    const bind=byIdentity.get(id);
++    if(!bind) return item;
++    const issueText=bind.issueLabels.slice(0,2).map(x=>`“${x.slice(0,160)}${x.length>160?'…':''}”`).join(' | ');
++    const nexus=bind.matched.slice(0,6).join(', ');
++    const article=bind.articles.length?bind.articles.slice(0,6).join(', '):item.article;
++    const provenance=safeString(item.relevance)
++      .replace(/Keterkaitan material dengan isu telah lolos[^.]*\.?/gi,'')
++      .replace(/Kandidat ditemukan melalui penelusuran\s+"[^"]*"\.?/gi,'')
++      .trim();
++    const relevance=[
++      issueText?`Terikat pada isu: ${issueText}.`:'',
++      nexus?`Nexus substansi yang terdeteksi: ${nexus}.`:'',
++      provenance,
++    ].filter(Boolean).join(' ');
++    return {...item,article,relevance};
++  });
++}
++
+ export interface CasePipelineGate {
+   status: 'READY' | 'DEGRADED'; passed: boolean; score: number;
+   checks: Array<{ key: string; passed: boolean; detail: string }>;
+@@ -2148,6 +2238,7 @@
+   }
+ 
+   applicable_law=filterApplicableLawToBoundAuthorities(applicable_law,boundAuthorityLabels,boundAuthorityIdentities);
++  applicable_law=enrichApplicableLawFromIssueBindings(applicable_law,legal_issues);
+ 
+   tracer.begin('lawyer_workflow');
+   const lawyer_workflow = buildLawyerWorkflow({
+@@ -2537,6 +2628,7 @@
+   extractSourceLawCitations,
+   bindIssuesToAuthorities,
+   filterApplicableLawToBoundAuthorities,
++  enrichApplicableLawFromIssueBindings,
+   detectCaseRegimeContext,
+   reconcileLegalContextWithRegime,
+   prioritizeIssuesForDomain,

@@ -17,20 +17,26 @@ class LexicoreDB {
   private complianceRules: Record<string, any> = {};
   
   private profile: FirmProfile = {
-    display_name: 'Kantor Advokat & Konsultan Hukum LexiCore',
-    professional_name: 'Advokat & Praktisi Hukum',
-    firm_name: 'LexiCore Law Office & Partners',
-    credentials: 'S.H., M.H.',
-    email: 'advokat@lexicore.id',
-    office_address: 'Gedung Kemitraan Hukum, Jl. Rasuna Said No. 12, Jakarta',
-    phone: '+62 812-3456-7890',
-    watermark_text: 'LEXICORE WORKING PAPER',
-    branding_mode: 'co_brand',
-    configured: true,
-    first_run_required: false,
+    display_name: '',
+    professional_name: '',
+    firm_name: '',
+    credentials: '',
+    email: '',
+    office_address: '',
+    phone: '',
+    watermark_text: '',
+    branding_mode: 'profile_only',
+    configured: false,
+    first_run_required: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
+  private readonly profilePath = (() => {
+    const explicit = String(process.env.LEXICORE_PROFILE_PATH || '').trim();
+    if (explicit) return explicit;
+    const base = String(process.env.APPDATA || process.env.XDG_CONFIG_HOME || process.env.HOME || process.cwd()).trim();
+    return path.join(base, 'LexiCore', 'profile.json');
+  })();
 
   private drafts: LegalDraft[] = [];
   private contractAnalyses: ContractAnalysis[] = [];
@@ -53,6 +59,34 @@ class LexicoreDB {
 
   constructor() {
     this.initData();
+    this.loadProfile();
+  }
+
+  private loadProfile() {
+    try {
+      if (!fs.existsSync(this.profilePath)) return;
+      const raw = JSON.parse(fs.readFileSync(this.profilePath, 'utf8')) as Partial<FirmProfile>;
+      const displayName = String(raw.display_name || '').trim();
+      this.profile = {
+        ...this.profile,
+        ...raw,
+        display_name: displayName,
+        configured: Boolean(raw.configured && displayName),
+        first_run_required: !(raw.configured && displayName),
+      };
+    } catch (e) {
+      console.warn('Failed to load LexiCore profile:', e);
+    }
+  }
+
+  private persistProfile() {
+    try {
+      fs.mkdirSync(path.dirname(this.profilePath), { recursive: true });
+      fs.writeFileSync(this.profilePath, `${JSON.stringify(this.profile, null, 2)}
+`, 'utf8');
+    } catch (e) {
+      console.warn('Failed to persist LexiCore profile:', e);
+    }
   }
 
   private initData() {
@@ -137,13 +171,22 @@ class LexicoreDB {
   }
 
   updateProfile(data: Partial<FirmProfile>): FirmProfile {
+    const allowed: Array<keyof FirmProfile> = ['display_name','professional_name','firm_name','credentials','email','office_address','phone','watermark_text','branding_mode'];
+    const next: Partial<FirmProfile> = {};
+    for (const key of allowed) {
+      if (data[key] !== undefined) (next as any)[key] = String(data[key] ?? '').trim();
+    }
+    const displayName = String(next.display_name ?? this.profile.display_name ?? '').trim();
     this.profile = {
       ...this.profile,
-      ...data,
-      configured: true,
+      ...next,
+      display_name: displayName,
+      configured: Boolean(displayName),
+      first_run_required: !displayName,
       updated_at: new Date().toISOString()
     };
-    this.logAudit('PROFILE_UPDATED', `Identitas firma diperbarui: ${this.profile.display_name}`);
+    this.persistProfile();
+    this.logAudit('PROFILE_UPDATED', `Identitas firma diperbarui: ${this.profile.display_name || '(belum diisi)'}`);
     return this.getProfile();
   }
 
@@ -360,6 +403,32 @@ class LexicoreDB {
     this.caseAnalyses.push(item);
     this.logAudit('CASE_ANALYZED', `Case analysis dijalankan: ${item.title}`);
     return item;
+  }
+
+  updateCaseAnalysis(id: number, data: Partial<CaseAnalysisRecord>): CaseAnalysisRecord | null {
+    const idx = this.caseAnalyses.findIndex(c => c.id === id);
+    if (idx === -1) return null;
+    const current = this.caseAnalyses[idx];
+    const next: CaseAnalysisRecord = {
+      ...current,
+      ...data,
+      id: current.id,
+      created_at: current.created_at,
+    };
+    this.caseAnalyses[idx] = next;
+    return next;
+  }
+
+  restoreCaseAnalysis(record: CaseAnalysisRecord): CaseAnalysisRecord {
+    const existing = this.getCaseAnalysis(record.id);
+    if (existing) {
+      this.updateCaseAnalysis(record.id, record);
+      return this.getCaseAnalysis(record.id)!;
+    }
+    this.caseAnalyses.push({ ...record });
+    this.caseAnalyses.sort((a,b)=>a.id-b.id);
+    this.nextId.caseAnalysis = Math.max(this.nextId.caseAnalysis, Number(record.id || 0) + 1);
+    return this.getCaseAnalysis(record.id)!;
   }
 
   deleteCaseAnalysis(id: number): boolean {

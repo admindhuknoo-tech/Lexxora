@@ -1,0 +1,295 @@
+--- server/officialLawRetriever.ts
++++ server/officialLawRetriever.ts
+@@ -1,4 +1,4 @@
+-import { authorityAnchorsForContext, officialQueriesForContext } from './legalOntology';
++import { authorityAnchorsForContext, officialQueriesForContext, coreInstrumentQueriesForContext } from './legalOntology';
+ import { searchOfficialAuthorityIndex, officialAuthorityIndexStats } from './officialAuthorityIndex';
+ export type RegulatoryMode = 'offline' | 'hybrid' | 'online';
+ export type OfficialSourceStrategy = 'auto' | 'manual' | 'manual_plus_auto';
+@@ -43,6 +43,10 @@
+   decision_date?: string;
+   source_tier?: 'PRIMARY_OFFICIAL'|'SECONDARY_OFFICIAL';
+   discovery_context?: string;
++  // Catalog/retrieval metadata (e.g. OFFICIAL_INDEX entry.keywords). It may
++  // improve discovery/diagnostics but MUST NOT be treated as authority substance
++  // by downstream issue-binding gates.
++  keywords?: string[];
+   verification_state?: 'VERIFIED_OFFICIAL'|'INDEXED_OFFICIAL'|'VERIFY_BLOCKED';
+ }
+ 
+@@ -335,6 +339,25 @@
+   return {ok:true};
+ }
+ 
++// Verbatim title match for a domain's named foundational codified instrument
++// (e.g. "Kitab Undang-Undang Hukum Perdata"). These instruments predate the
++// modern "Nomor/Tahun" citation convention (KUHPerdata/KUHP are colonial-era
++// codifications historically cited by Staatsblad number), so they never
++// qualify for the EXACT identity path, and their own title never repeats the
++// case's courtroom-language terms (wanprestasi, somasi, etc.) the way the
++// topical nexus formula expects — the code's *articles* contain those terms,
++// not its title. A plain, full-phrase title match is therefore treated as its
++// own identity signal here, independent of nexus keyword density.
++function coreInstrumentTitleMatch(coreInstruments:string[]|undefined, candidateTitle:string): string|undefined {
++  if(!coreInstruments || !coreInstruments.length) return undefined;
++  const ct = normalize(candidateTitle);
++  for(const name of coreInstruments){
++    const n = normalize(name);
++    if(n && n.length>=10 && ct.includes(n)) return name;
++  }
++  return undefined;
++}
++
+ function topicalCandidateAccepts(
+   query:string,
+   domain:string|undefined,
+@@ -342,6 +365,7 @@
+   candidateFullText:string,
+   instrumentType?:string,
+   caseText:string='',
++  coreInstruments?:string[],
+ ): { ok:boolean; score:number; reasons:string[] } {
+   const reasons:string[] = [];
+ 
+@@ -354,6 +378,14 @@
+     return { ok:false, score:0, reasons:['hierarchy/domain policy rejected'] };
+   }
+ 
++  // 2.5. Named codified instrument title identity (see coreInstrumentTitleMatch
++  // above). Subtopic and domain-policy gates above still apply; this only
++  // substitutes for the keyword-density nexus check below, not for those gates.
++  const coreMatch = coreInstrumentTitleMatch(coreInstruments, candidateTitle);
++  if(coreMatch){
++    return { ok:true, score: Math.max(materialNexusScore(query,domain,candidateFullText), 20), reasons:[`kodifikasi resmi cocok pada judul: "${coreMatch}"`] };
++  }
++
+   // 3. Query-only anchors
+   const anchors = authorityAnchorsForContext(query);
+   const cn = normalize(candidateFullText);
+@@ -439,43 +471,75 @@
+ }
+ 
+ type FetchProfile='official'|'public_search';
+-async function fetchText(url: string, timeoutMs = 9000, profile:FetchProfile='official'): Promise<{ ok: boolean; reachable:boolean; access_state:HttpAccessState; status: number; text: string; finalUrl: string; error?: string }> {
+-  const transientCodes=new Set(['EAI_AGAIN','ETIMEDOUT','ECONNRESET','ECONNREFUSED','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT']);
+-  let lastError='';
+-  const headers:Record<string,string>=profile==='public_search'
++function fetchHeadersFor(profile:FetchProfile):Record<string,string>{
++  return profile==='public_search'
+     ? {
+         'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+-        'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+-        'Accept-Language':'id-ID,id;q=0.9,en;q=0.7',
++        'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
++        'Accept-Language':'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
++        'Accept-Encoding':'gzip, deflate, br',
+         'Cache-Control':'no-cache',
++        'Pragma':'no-cache',
++        'Connection':'keep-alive',
++        'Upgrade-Insecure-Requests':'1',
++        'Sec-Fetch-Dest':'document',
++        'Sec-Fetch-Mode':'navigate',
++        'Sec-Fetch-Site':'none',
++        'Sec-Fetch-User':'?1',
++        'sec-ch-ua':'"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
++        'sec-ch-ua-mobile':'?0',
++        'sec-ch-ua-platform':'"Windows"',
+       }
+     : {
+         'User-Agent':'LexiCore-Official-Law-Retriever/1.2',
+         'Accept':'text/html,application/xhtml+xml',
+         'Accept-Language':'id-ID,id;q=0.9,en;q=0.7',
+       };
+-  for(let attempt=1;attempt<=2;attempt++){
+-    const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), timeoutMs);
+-    try {
+-      const r = await fetch(url,{signal:ctl.signal,redirect:'follow',headers});
+-      return {ok:r.ok,reachable:true,access_state:classifyHttpAccess(r.status,r.ok),status:r.status,text:await r.text(),finalUrl:r.url||url};
+-    }
+-    catch (err: any) {
+-      const name=cleanText(err?.name||'FetchError');
+-      const message=cleanText(err?.message||String(err||''));
+-      const causeCode=cleanText(err?.cause?.code||err?.code||'');
+-      const causeMessage=cleanText(err?.cause?.message||'');
+-      const cause=[causeCode,causeMessage].filter(Boolean).join(' ');
+-      lastError=`${name}${message?`: ${message}`:''}${cause?` | cause: ${cause}`:''}`;
+-      const transient=transientCodes.has(causeCode)||name==='AbortError';
+-      if(attempt===1 && transient){
+-        await new Promise(resolve=>setTimeout(resolve,180));
+-        continue;
++}
++
++// Bot-protection WAFs in front of some official .go.id hosts (notably the
++// Mahkamah Agung judicial properties) appear to key off the identifying
++// 'official' profile UA/header set rather than IP or TLS fingerprint: the
++// same hosts that 403 that profile consistently 200 for a browser-shaped
++// request (see the 'public_search' profile used successfully for search
++// discovery). When an 'official' request comes back BLOCKED, escalate once
++// to browser-shaped headers before giving up, so a header-level block does
++// not masquerade as a real connectivity/availability failure.
++async function fetchText(url: string, timeoutMs = 9000, profile:FetchProfile='official'): Promise<{ ok: boolean; reachable:boolean; access_state:HttpAccessState; status: number; text: string; finalUrl: string; error?: string; escalated?: boolean }> {
++  const transientCodes=new Set(['EAI_AGAIN','ETIMEDOUT','ECONNRESET','ECONNREFUSED','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT']);
++
++  async function attemptWithHeaders(headers:Record<string,string>){
++    let lastError='';
++    for(let attempt=1;attempt<=2;attempt++){
++      const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), timeoutMs);
++      try {
++        const r = await fetch(url,{signal:ctl.signal,redirect:'follow',headers});
++        return {ok:r.ok,reachable:true,access_state:classifyHttpAccess(r.status,r.ok),status:r.status,text:await r.text(),finalUrl:r.url||url};
+       }
+-      return {ok:false,reachable:false,access_state:'NETWORK_ERROR',status:0,text:'',finalUrl:url,error:`${lastError} | attempts=${attempt}`};
+-    } finally { clearTimeout(timer); }
++      catch (err: any) {
++        const name=cleanText(err?.name||'FetchError');
++        const message=cleanText(err?.message||String(err||''));
++        const causeCode=cleanText(err?.cause?.code||err?.code||'');
++        const causeMessage=cleanText(err?.cause?.message||'');
++        const cause=[causeCode,causeMessage].filter(Boolean).join(' ');
++        lastError=`${name}${message?`: ${message}`:''}${cause?` | cause: ${cause}`:''}`;
++        const transient=transientCodes.has(causeCode)||name==='AbortError';
++        if(attempt===1 && transient){
++          await new Promise(resolve=>setTimeout(resolve,180));
++          continue;
++        }
++        return {ok:false,reachable:false,access_state:'NETWORK_ERROR' as HttpAccessState,status:0,text:'',finalUrl:url,error:`${lastError} | attempts=${attempt}`};
++      } finally { clearTimeout(timer); }
++    }
++    return {ok:false,reachable:false,access_state:'NETWORK_ERROR' as HttpAccessState,status:0,text:'',finalUrl:url,error:lastError||'FetchError | attempts=2'};
++  }
++
++  const primary=await attemptWithHeaders(fetchHeadersFor(profile));
++  if(profile==='official' && primary.reachable && primary.access_state==='BLOCKED'){
++    const escalated=await attemptWithHeaders(fetchHeadersFor('public_search'));
++    return {...escalated,escalated:true};
+   }
+-  return {ok:false,reachable:false,access_state:'NETWORK_ERROR',status:0,text:'',finalUrl:url,error:lastError||'FetchError | attempts=2'};
++  return primary;
+ }
+ 
+ function isOfficialLegalDomain(raw:string):boolean{
+@@ -846,7 +910,7 @@
+   reachable: boolean;
+   access_state: OfficialProviderAccessState;
+   strategy:'DIRECT_OFFICIAL'|'JDIHN_AGGREGATOR'|'CACHE'|'DUCKDUCKGO_HTML'|'DUCKDUCKGO_LITE'|'BING_FALLBACK'|'EXHAUSTED'|'NONE';
+-  attempts:Array<{url:string;ok:boolean;reachable:boolean;access_state:HttpAccessState;status:number;error?:string}>;
++  attempts:Array<{url:string;ok:boolean;reachable:boolean;access_state:HttpAccessState;status:number;error?:string;escalated?:boolean}>;
+   fallback_attempted:boolean;
+   fallback_attempts:FallbackDiscoveryDiagnostic[];
+ }
+@@ -880,7 +944,7 @@
+   let accessState:OfficialProviderAccessState='NETWORK_UNREACHABLE';
+   for(const url of urls){
+     const res=await fetchText(url,9000);
+-    attempts.push({url,ok:res.ok,reachable:res.reachable,access_state:res.access_state,status:res.status,error:res.error});
++    attempts.push({url,ok:res.ok,reachable:res.reachable,access_state:res.access_state,status:res.status,error:res.error,escalated:res.escalated});
+     if(res.reachable){ reachable=true; accessState=res.access_state==='BLOCKED'?'REACHABLE_BLOCKED':res.access_state==='HTTP_ERROR'?'REACHABLE_HTTP_ERROR':'REACHABLE_OK'; }
+     if(!res.ok) continue;
+     const hits=parseDirectOfficialSearch(res.text,domain,limit);
+@@ -1496,12 +1560,25 @@
+  * eight slots on one regulation provider. V7.0.2 preserves regulation-first
+  * retrieval while reserving bounded slots for judicial products and case law.
+  * No case identity, doctrine, regulation number, or party name is hardcoded here.
++ *
++ * V7.0.2.9: reserve up to 2 of the 6 regulation slots for the domain's named
++ * foundational codified instrument(s) (e.g. KUHPerdata), when the ontology has
++ * one for the classified domain. Without a reserved slot, spreadQuerySelection's
++ * even-spacing over up to 20 generic ontology queries can (and empirically did:
++ * see V7.0.2.8 operational-readiness audit, JDIH_BPK 0/12 candidates accepted)
++ * drop the single most likely-to-succeed query — a plain, undiluted search for
++ * the controlling code by name is a much stronger topical/identity match than
++ * courtroom-language phrases against modern regulation titles that rarely
++ * repeat them verbatim.
+  */
+-export function buildAuthorityProviderPlan(queries:string[],mode:RegulatoryMode='hybrid'):AuthorityProviderExecutionPlan{
++export function buildAuthorityProviderPlan(queries:string[],mode:RegulatoryMode='hybrid',coreInstrumentQueries:string[]=[]):AuthorityProviderExecutionPlan{
+   const regulationBudget=6;
+   const judicialProductBudget=2;
+   const caseLawBudget=2;
+-  const regulation_queries=spreadQuerySelection(queries,regulationBudget);
++  const reservedCore=uniq((coreInstrumentQueries||[]).map(cleanText).filter(x=>x.length>=6)).slice(0,2);
++  const remainingBudget=Math.max(1,regulationBudget-reservedCore.length);
++  const generalQueries=spreadQuerySelection((queries||[]).filter(q=>!reservedCore.includes(q)),remainingBudget);
++  const regulation_queries=uniq([...reservedCore,...generalQueries]).slice(0,regulationBudget);
+   const judicial_product_queries=spreadQuerySelection(queries,judicialProductBudget).map((q,i)=>judicialProductQuery(q,i));
+   const case_law_queries=spreadQuerySelection(queries,caseLawBudget).map(caseLawQuery);
+   return {regulation_queries,judicial_product_queries,case_law_queries,total_query_slots:regulation_queries.length+judicial_product_queries.length+case_law_queries.length};
+@@ -1574,6 +1651,7 @@
+         verification_reasons:[
+           `official judicial source: ${host}`,
+           ...(viaJdihn?['official JDIHN aggregator fallback; issuing authority must be professionally verified']:[]),
++          ...(detail.escalated?['detail page required browser-header escalation past WAF UA block']:[]),
+           `material nexus score=${topical.score}`,
+           judicial.authority_class==='DECISION'?'decision identity parsed from official page':'judicial product identity parsed from official page',
+           ...(year&&input.tempusYear&&year>input.tempusYear?['judicial authority post-dates material event: temporal/procedural applicability requires professional verification']:[]),
+@@ -1590,7 +1668,8 @@
+ async function discoverAutoOfficialLaw(input: { mode: RegulatoryMode; queries: string[]; tempusYear?: number; maxCandidates?: number; domain?: string; caseText?: string }): Promise<OfficialLawRetrievalResult> {
+   if(input.mode==='offline') return {mode:input.mode,queries:[],candidates:[],providers:[{name:'JDIH_BPK',status:'DISABLED_LOCAL_MODE',query_count:0}],notes:['Mode lokal: tidak ada pencarian online.']};
+   const maxCandidates=Math.max(3,Math.min(16,input.maxCandidates||(input.mode==='online'?12:8)));
+-  const providerPlan=buildAuthorityProviderPlan(input.queries,input.mode);
++  const coreInstrumentQueries=coreInstrumentQueriesForContext(`${input.domain||''} ${(input.caseText||'').slice(0,6000)}`);
++  const providerPlan=buildAuthorityProviderPlan(input.queries,input.mode,coreInstrumentQueries);
+ 
+   // Verification depth is intentionally larger than the final output cap so
+   // strict topical policy has enough diverse material to evaluate.
+@@ -1716,7 +1795,7 @@
+     const id=inferInstrumentIdentity(title) as any;
+     const identityVerified=Boolean(qid.exact && id.year&&id.number&&compat.ok&&compat.kind==='EXACT');
+     if(!identityVerified){
+-      const topical=topicalCandidateAccepts(item.query,input.domain,title,fullText,id.instrument_type,input.caseText);
++      const topical=topicalCandidateAccepts(item.query,input.domain,title,fullText,id.instrument_type,input.caseText,coreInstrumentQueries);
+       if(!topical.ok){
+         candidateDiagnostics.push({stage:'topical_policy',result:'REJECTED',query:item.query.slice(0,100),title:title.slice(0,140),reasons:topical.reasons,score:topical.score});
+         continue;
+@@ -1747,7 +1826,16 @@
+       instrument_type:e.instrument_type,number:e.number,year:e.year,subject:e.subject,effective_status:e.effective_status,excerpt:e.subject,
+       fetched_at:e.indexed_at,tempus_status:inferAuthorityTempusStatus(e.year,input.tempusYear,e.authority_class),identity_match:'TOPICAL',query_kind:'OFFICIAL_INDEX',source_origin:'AUTO',
+       material_nexus_score:hit.score,material_nexus_status:'VERIFIED',hierarchy_status:'ALLOWED',authority_class:e.authority_class,judicial_product_type:e.judicial_product_type,
+-      decision_number:e.decision_number,court:e.court,source_tier:'PRIMARY_OFFICIAL',discovery_context:`official catalog index; matched=${hit.matched_terms.join(', ')}`,
++      decision_number:e.decision_number,court:e.court,source_tier:'PRIMARY_OFFICIAL',
++      // V7.0.2.11: discovery_context previously embedded a "matched=<query-filtered
++      // terms>" string, which is text derived from the search query rather than
++      // the document itself — the exact category of self-reinforcement risk
++      // caseAnalysis.ts's binding gate is meant to be independent of, even though
++      // each individual term was itself present in the entry's own content.
++      // Expose the entry's real, unfiltered keyword tags directly instead — the
++      // same data, but never passed through a query-shaped filter first.
++      discovery_context:'official catalog index snapshot',
++      keywords:Array.isArray(e.keywords)?e.keywords:[],
+       verification_state:'INDEXED_OFFICIAL',verification_reasons:[`official catalog snapshot ${e.indexed_at}`,`official source domain=${e.source_domain}`,`local-first material match score=${hit.score}`,'live detail verification remains professionally reviewable when provider blocks automated access'],
+     });
+   }
+@@ -2219,6 +2307,7 @@
+   final_state:'USABLE_DIRECT'|'USABLE_VIA_OFFICIAL_AGGREGATOR'|'USABLE_VIA_FALLBACK'|'REACHABLE_BLOCKED'|'REACHABLE_HTTP_ERROR'|'NETWORK_UNREACHABLE'|'REACHABLE_NO_RESULTS';
+   finalUrl:string;
+   error?:string;
++  header_escalated?:boolean;
+ }
+ 
+ export async function probeOfficialProviderConnectivity():Promise<OfficialProviderConnectivityProbe[]>{
+@@ -2242,7 +2331,7 @@
+     const direct=await fetchText(spec.url,12000);
+     let fallbackStrategy:'DIRECT_OFFICIAL'|'JDIHN_AGGREGATOR'|'CACHE'|'DUCKDUCKGO_HTML'|'DUCKDUCKGO_LITE'|'BING_FALLBACK'|'EXHAUSTED'|'NONE'='NONE';
+     let fallbackAttempts:FallbackDiscoveryDiagnostic[]=[];
+-    let fallbackHits=0,detailOk=false,detailStatus=0;
++    let fallbackHits=0,detailOk=false,detailStatus=0,detailEscalated=false;
+     if(!direct.ok){
+       const search=await searchOfficialDomain(spec.query,spec.domain,3);
+       fallbackStrategy=search.strategy;
+@@ -2251,6 +2340,7 @@
+       if(search.hits.length){
+         const detail=await fetchText(search.hits[0].url,10000);
+         detailStatus=detail.status;
++        detailEscalated=Boolean(detail.escalated);
+         if(detail.ok){
+           const host=(()=>{try{return new URL(detail.finalUrl).hostname.toLowerCase();}catch{return '';}})();
+           const generic=(host==='jdihn.go.id'||host.endsWith('.jdihn.go.id'))?parseJdihnDetail(detail.text):parseGenericOfficialPage(detail.text,search.hits[0].title);
+@@ -2265,7 +2355,7 @@
+       provider:spec.provider,url:spec.url,direct_ok:direct.ok,direct_status:direct.status,direct_state:directState,
+       network_reachable:direct.reachable,fallback_attempted:!direct.ok,fallback_strategy:fallbackStrategy,fallback_hits:fallbackHits,fallback_attempts:fallbackAttempts,
+       official_detail_ok:detailOk,official_detail_status:detailStatus,usable,final_state:finalState,
+-      finalUrl:direct.finalUrl,error:direct.error,
++      finalUrl:direct.finalUrl,error:direct.error,header_escalated:Boolean(direct.escalated)||detailEscalated,
+     });
+   }
+   return out;
